@@ -9,8 +9,8 @@ inline int INDEX(int row, int col, int stride) { return row * stride + col; }
 #define MISMATCH -3
 #define GAP -2
 
-#define MAIN_SEQUENCE "-AGGTTGACTA"
-#define SEQUENCE "-TGTTACGG"
+#define MAIN_SEQUENCE "-CACTATGC"
+#define SEQUENCE "-AGCCTCA"
 
 enum dir { STOP, DIAG, UP, LEFT };
 struct sw_mat {
@@ -27,7 +27,7 @@ void cpu_alignment(sw_mat* h, string seq_1, string seq_2, int seq_1_length, int 
             int l = h[INDEX(i, j - 1, seq_2_length)].value + GAP;
             int result = max({0, d, u, l});
             
-            cout << result << " ";
+            //cout << result << " ";
 
             sw_mat* h_current = &h[INDEX(i, j, seq_2_length)];
             h_current->value = result;
@@ -37,7 +37,7 @@ void cpu_alignment(sw_mat* h, string seq_1, string seq_2, int seq_1_length, int 
             else if (result == u)   h_current->dir = UP;
             else if (result == l)   h_current->dir = LEFT;
         }
-        cout << endl;
+        //cout << endl;
     }
 }
 
@@ -105,8 +105,14 @@ int main(int argc, char **argv) {
         swap(seq_2[k], seq_2[rsize - 1 - k]);
     }
 
+    cout << seq_1 << endl << seq_2 << endl << endl;
+
+    int start = abs(i - j);
+
+    if(i < j) cout << string(start, ' ');
     cout << main_sequence.substr(0, i + 1) << "|" << seq_1 << "|" << main_sequence.substr(i + 1 + seq_1.length() - seq_1_gap, main_len) << endl;
-    cout << string(i - j, ' ') << sequence.substr(0, j + 1) << "|" << seq_2 << "|" << sequence.substr(j + 1 + seq_2.length() - seq_2_gap, seq_len) << endl;
+    if(i > j) cout << string(start, ' ');
+    cout << sequence.substr(0, j + 1) << "|" << seq_2 << "|" << sequence.substr(j + 1 + seq_2.length() - seq_2_gap, seq_len) << endl;
     
 	return(0);
 }
