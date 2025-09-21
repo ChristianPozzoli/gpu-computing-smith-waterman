@@ -187,7 +187,17 @@ int main(int argc, char **argv) {
     // Traceback
     traceback(h, size, main_sequence, sequence, rows, cols);
     traceback(h1, size, main_sequence, sequence, rows, cols);
+
+    bool err = false;
+    for(int i = 0; i < size && !err; ++i) {
+        err = h[i].value != h1[i].value || h[i].dir != h1[i].dir;
+    }
     
+    if(err) {
+        cout << "ERROR: results do not match!" << endl;
+        return(0);
+    }
+
     cout << "CPU time: " << stopCPU << "s" << endl;
     cout << "GPU time: " << stopGPU << "s" << endl;
     cout << "Speed up: " << stopCPU / stopGPU << endl;
