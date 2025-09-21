@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string.h>
 #include "utils/common.h"
+#include <cuda_runtime.h>
 
 using namespace std;
 
@@ -94,7 +95,7 @@ void cpu_alignment(sw_mat* h, string seq_1, string seq_2, int seq_1_length, int 
             int d = h[INDEX(i - 1, j - 1, seq_2_length)].value + (match ? MATCH : MISMATCH);
             int u = h[INDEX(i - 1, j, seq_2_length)].value + GAP;
             int l = h[INDEX(i, j - 1, seq_2_length)].value + GAP;
-            int result = max({0, d, u, l});
+            int result = max(max(0, d), max(u, l));
             
             sw_mat* h_current = &h[INDEX(i, j, seq_2_length)];
             h_current->value = result;
@@ -108,7 +109,7 @@ void cpu_alignment(sw_mat* h, string seq_1, string seq_2, int seq_1_length, int 
 }
 
 __global__ void gpu_alignment(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length) {
-    int i = threadIdx.x;
+    int i = threadIdx.x + 1;
     for (int j = 1; j < seq_2_length; ++j) {
         bool match = seq_1[i] == seq_2[j];
         int d = h[INDEX(i - 1, j - 1, seq_2_length)].value + (match ? MATCH : MISMATCH);
@@ -123,9 +124,7 @@ __global__ void gpu_alignment(sw_mat* h, char* seq_1, char* seq_2, int seq_1_len
             }
         }
         
-        int result = max(0, d);
-        result = max(result, u);
-        result = max(result, l);
+        int result = max(max(0, d), max(u, l));
         
         sw_mat* h_current = &h[INDEX(i, j, seq_2_length)];
         h_current->value = result;
@@ -175,7 +174,7 @@ int main(int argc, char **argv) {
     
     // GPU
     dim3 grid(1, 1, 1);
-    dim3 block(rows, 1, 1);
+    dim3 block(rows - 1, 1, 1);
     
     start = seconds();
     gpu_alignment<<<grid, block>>>(d_h, d_main_seq, d_seq, rows, cols);
