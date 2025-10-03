@@ -268,8 +268,8 @@ int main(int argc, char **argv) {
     cout << "| GPU time (no SMEM): " << stopGPU_noSMEM << "s" << endl;
     cout << "| GPU time (SMEM): " << stopGPU_SMEM << "s" << endl;
     cout << "|===============================" << endl;
-    cout << "| CPU Speed up no SMEM: " << stopCPU / stopGPU_noSMEM << endl;
-    cout << "| CPU Speed up SMEM: " << stopCPU / stopGPU_SMEM << endl;
+    cout << "| Speed up over CPU (no SMEM): " << stopCPU / stopGPU_noSMEM << endl;
+    cout << "| Speed up over CPU (SMEM): " << stopCPU / stopGPU_SMEM << endl;
     cout << "| Speed up SMEM: " << stopGPU_noSMEM / stopGPU_SMEM << endl;
     cout << "|===============================" << endl;
     
