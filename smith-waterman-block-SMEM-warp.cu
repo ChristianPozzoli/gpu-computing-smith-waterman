@@ -370,21 +370,22 @@ int main(int argc, char **argv) {
     
     if(err) {
         cout << "ERROR: results do not match!" << endl;
-        return(0);
+        return(1);
     }
     
-    cout << "|============RESULTS============" << endl;
-    cout << "| CPU time: " << stopCPU << "s" << endl;
-    cout << "| GPU time (no SMEM): " << stopGPU_noSMEM << "s" << endl;
-    cout << "| GPU time (SMEM): " << stopGPU_SMEM << "s" << endl;
-    cout << "| GPU time (warp): " << stopGPU_warp << "s" << endl;
-    cout << "|===============================" << endl;
-    cout << "| Speed up over CPU (no SMEM): " << stopCPU / stopGPU_noSMEM << endl;
-    cout << "| Speed up over CPU (SMEM): " << stopCPU / stopGPU_SMEM << endl;
-    cout << "| Speed up over CPU (warp): " << stopCPU / stopGPU_warp << endl;
-    cout << "| Speed up SMEM: " << stopGPU_noSMEM / stopGPU_SMEM << endl;
-    cout << "| Speed up warp: " << stopGPU_SMEM / stopGPU_warp << endl;
-    cout << "|===============================" << endl;
+    cout << "|=============RESULTS=============" << endl;
+    cout << "| CPU time:\t\t" << stopCPU << "s" << endl;
+    cout << "| GPU time (parallel):\t" << stopGPU_noSMEM << "s" << endl;
+    cout << "| GPU time (SMEM):\t" << stopGPU_SMEM << "s" << endl;
+    cout << "| GPU time (warp):\t" << stopGPU_warp << "s" << endl;
+    cout << "|============SPEED UP=============" << endl;
+    cout << "| Over CPU (parallel):\t" << stopCPU / stopGPU_noSMEM << endl;
+    cout << "| Over CPU (SMEM):\t" << stopCPU / stopGPU_SMEM << endl;
+    cout << "| Over CPU (warp):\t" << stopCPU / stopGPU_warp << endl;
+    cout << "|=================================" << endl;
+    cout << "| Over parallel (SMEM):\t" << stopGPU_noSMEM / stopGPU_SMEM << endl;
+    cout << "| Over SMEM (warp):\t" << stopGPU_SMEM / stopGPU_warp << endl;
+    cout << "|=================================" << endl;
     
 	return(0);
 }

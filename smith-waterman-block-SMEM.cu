@@ -260,7 +260,7 @@ int main(int argc, char **argv) {
 
     if(err) {
         cout << "ERROR: results do not match!" << endl;
-        return(0);
+        return(1);
     }
     
     cout << "|============RESULTS============" << endl;
