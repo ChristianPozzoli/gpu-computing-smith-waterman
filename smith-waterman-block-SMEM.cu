@@ -188,6 +188,20 @@ __global__ void gpu_alignment_smem(sw_mat* h, char* seq_1, char seq_2_char, int 
     else if (result == l)   h_current->dir = LEFT;
 }
 
+__global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+    for (int j = 1; j < seq_2_length; ++j) {
+        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
+        __syncthreads();
+    }
+}
+
+__global__ void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+    for (int j = 1; j < seq_2_length; ++j) {
+        gpu_alignment_smem<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
+        __syncthreads();
+    }
+}
+
 int main(int argc, char **argv) {
     string main_sequence = MAIN_SEQUENCE;
     string sequence = SEQUENCE;
@@ -203,7 +217,7 @@ int main(int argc, char **argv) {
     sw_mat* h2 = (sw_mat*) malloc(nBytes); // Result GPU SMEM
     
     sw_mat *d_h1, *d_h2;
-    char *d_main_seq;
+    char *d_main_seq, *d_seq;
     
     for(int i = 0; i < size; ++i) {
         h[i].value = 0;
@@ -213,10 +227,12 @@ int main(int argc, char **argv) {
     CHECK(cudaMalloc((void** )&d_h1, nBytes));
     CHECK(cudaMalloc((void** )&d_h2, nBytes));
     CHECK(cudaMalloc((void** )&d_main_seq, rows * sizeof(char)));
+    CHECK(cudaMalloc((void** )&d_seq, cols * sizeof(char)));
 
     CHECK(cudaMemcpy(d_h1, h, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_h2, h, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_main_seq, main_sequence.c_str(), rows * sizeof(char), cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(d_seq, sequence.c_str(), cols * sizeof(char), cudaMemcpyHostToDevice));
 
     // CPU
     double start = seconds();
@@ -224,54 +240,52 @@ int main(int argc, char **argv) {
     double stopCPU = seconds() - start;
     
     // GPU
-    int blocks = (rows + THREADS - 1) / THREADS;
+    int blocks_n = (rows + THREADS - 1) / THREADS;
 
-    dim3 grid(blocks, 1, 1);
+    dim3 grid(blocks_n, 1, 1);
     dim3 block(THREADS, 1, 1);
     
     start = seconds();
-    for (int j = 1; j < cols; ++j) {
-        gpu_alignment<<<grid, block>>>(d_h1, d_main_seq, sequence[j], rows, cols, j);
-        CHECK(cudaDeviceSynchronize());
-    }
+    gpu_alignment_warp<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    CHECK(cudaDeviceSynchronize());
     double stopGPU_noSMEM = seconds() - start;
     
     start = seconds();
-    for (int j = 1; j < cols; ++j) {
-        gpu_alignment_smem<<<grid, block>>>(d_h2, d_main_seq, sequence[j], rows, cols, j);
-        CHECK(cudaDeviceSynchronize());
-    }
+    gpu_alignment_smem_loop<<<1, 1>>>(d_h2, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    CHECK(cudaDeviceSynchronize());
     double stopGPU_SMEM = seconds() - start;
     
     CHECK(cudaMemcpy(h1, d_h1, nBytes, cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(h2, d_h2, nBytes, cudaMemcpyDeviceToHost));
 
     // Traceback
+    /*
     traceback(h, size, main_sequence, sequence, rows, cols);
     traceback(h1, size, main_sequence, sequence, rows, cols);
     traceback(h2, size, main_sequence, sequence, rows, cols);
+    */
 
     bool err = false;
     for(int i = 0; i < size && !err; ++i) {
-        err = h[i].value != h1[i].value || h[i].dir != h1[i].dir || h[i].value != h2[i].value || h[i].dir != h2[i].dir;
+        err = h[i].value != h1[i].value || h[i].dir != h1[i].dir;
+        err |= h[i].value != h2[i].value || h[i].dir != h2[i].dir;
     }
-    
-    //cout << h2[0].value << " | " << h2[1].value << endl;
 
     if(err) {
         cout << "ERROR: results do not match!" << endl;
         return(1);
     }
     
-    cout << "|============RESULTS============" << endl;
-    cout << "| CPU time: " << stopCPU << "s" << endl;
-    cout << "| GPU time (no SMEM): " << stopGPU_noSMEM << "s" << endl;
-    cout << "| GPU time (SMEM): " << stopGPU_SMEM << "s" << endl;
-    cout << "|===============================" << endl;
-    cout << "| Speed up over CPU (no SMEM): " << stopCPU / stopGPU_noSMEM << endl;
-    cout << "| Speed up over CPU (SMEM): " << stopCPU / stopGPU_SMEM << endl;
-    cout << "| Speed up SMEM: " << stopGPU_noSMEM / stopGPU_SMEM << endl;
-    cout << "|===============================" << endl;
+    cout << "|=============RESULTS=============" << endl;
+    cout << "| CPU time:\t\t" << stopCPU << "s" << endl;
+    cout << "| GPU time (no SMEM):\t" << stopGPU_noSMEM << "s" << endl;
+    cout << "| GPU time (SMEM):\t" << stopGPU_SMEM << "s" << endl;
+    cout << "|============SPEED UP=============" << endl;
+    cout << "| Over CPU (no SMEM):\t" << stopCPU / stopGPU_noSMEM << endl;
+    cout << "| Over CPU (SMEM):\t" << stopCPU / stopGPU_SMEM << endl;
+    cout << "|=================================" << endl;
+    cout << "| Speed up SMEM:\t" << stopGPU_noSMEM / stopGPU_SMEM << endl;
+    cout << "|=================================" << endl;
     
 	return(0);
 }
