@@ -8,3 +8,12 @@
 *.lib
 *.exp
 .vscode/
+
+# LaTex
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.synctex.gz

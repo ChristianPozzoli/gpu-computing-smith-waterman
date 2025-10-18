@@ -1,0 +1,54 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[skip=10pt plus1pt, indent=0pt]{parskip}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+ \geometry{
+ a4paper,
+ left=25mm,
+ right=25mm,
+ top=30mm,
+ bottom=30mm,
+ }
+ \usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linktoc=all,
+    linkcolor=black,
+}
+
+\title{Riconoscimento di caratteri scritti a mano con rete neurale convoluzionale}
+\author{Christian Pozzoli 29678A}
+\date{Settembre 2025}
+
+\begin{document}
+\lstset{
+language=Python,
+basicstyle=\fontfamily{pcr}\footnotesize,
+comment=[l]{\#},
+commentstyle=\color{OliveGreen}\ttfamily,
+keywordstyle=\color{NavyBlue}\bfseries,
+numberstyle=\tiny\color{Gray},
+ndkeywordstyle=\bfseries,
+numbers=left
+}
+\maketitle
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{images/canvas.png}
+\end{figure}
+\newpage
+\renewcommand*\contentsname{Indice}
+\tableofcontents
+\newpage
+
+\section{Introduzione}
+\subsection{Allineamento di sequenze di DNA}
+\subsection{Obiettivo}
+
+
+\end{document}
