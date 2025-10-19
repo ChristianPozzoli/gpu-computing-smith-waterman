@@ -21,9 +21,9 @@
     linkcolor=black,
 }
 
-\title{Riconoscimento di caratteri scritti a mano con rete neurale convoluzionale}
+\title{Algoritmo parallelo di Smith-Waterman per allineamento di sequenze DNA}
 \author{Christian Pozzoli 29678A}
-\date{Settembre 2025}
+\date{Ottobre 2025}
 
 \begin{document}
 \lstset{
@@ -39,7 +39,7 @@ numbers=left
 \maketitle
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\linewidth]{images/canvas.png}
+    \includegraphics[width=0.8\linewidth]{images/cover.jpg}
 \end{figure}
 \newpage
 \renewcommand*\contentsname{Indice}
@@ -48,7 +48,57 @@ numbers=left
 
 \section{Introduzione}
 \subsection{Allineamento di sequenze di DNA}
-\subsection{Obiettivo}
+L'allineamento di sequenze di DNA è una delle operazioni fondamentali della bioinformatica e rappresenta uno strumento essenziale per lo studio comparativo dei genomi.
+L'obiettivo principale dell'allineamento è confrontare due o più sequenze di basi di nucleotidi al fine di individuare delle regioni di somiglianza che possono riflettere relazioni evolutive, funzionali o strutturali tra gli organismi.
 
+In termini pratici, un allineamento consiste nel disporre le sequenze una sopra l'altra, introducendo eventuali spazi vuoti ("gap") per massimizzare il numero di corrispondenze tra le basi.
+Questa operazione consente di identificare mutazioni, inserzioni o delezioni, e di dedurre l'origine comune di geni o proteine.
+Queste analisi sono fondamentali in vari ambiti applicativi, tra cui
+\begin{itemize}
+    \item l'annotazione di nuovi genomi
+    \item la ricerca di omologie tra geni
+    \item la previsione della funzione di proteine sconosciute
+    \item lo studio delle malattie genetiche
+\end{itemize}
+
+Esistono due principali categorie di allineamento: globale e locale.
+L'allineamento globale, proposto da Needleman e Wunsch (1970), confronta le sequenze nella loro interezza, ed è più adatto quando le sequenze hanno lunghezze simili e un alto grado di somiglianza.
+L'allineamento locale, introdotto da Smith e Waterman (1981), mira invece a trovare le regioni più simili all'interno di sequenze potenzialmente molto diverse, risultando particolarmente utile in contesti biologici reali, dove solo alcune porzioni delle sequenze mostrano omologia.
+
+\subsection{Obiettivo del progetto}
+L'obiettivo del progetto è implementare e ottimizzare l'algoritmo di Smith-Waterman sfruttando la potenza di calcolo parallelo delle GPU attraverso la piattaforma CUDA.
+L'algoritmo di Smith-Waterman presenta una complessità computazionale di tipo quadratico rispetto alla lunghezza delle sequenze da confrontare.
+Questo lo rende poco adatto all'elaborazione di grandi quantità di dati, come quelli generati dalle moderne tecniche di sequenziamento del DNA.
+
+L'obiettivo principale è quindi ridurre i tempi di esecuzione attraverso una parallelizzazione efficiente delle sue operazioni e mantenendo inalterata la precisione dell'algoritmo.
+
+Il progetto mira a dimostrare come l'uso del calcolo parallelo possa rendere praticabile l'utilizzo dell'algoritmo di Smith-Waterman anche in contesti reali e su dataset di grandi dimensioni.
+
+\subsection{Strumenti e ambiente di sviluppo}
+Lo sviluppo del progetto è stato condotto utilizzando il linguaggio CUDA C, sfruttando l'integrazione diretta con l'architettura di calcolo parallelo delle GPU NVIDIA.
+
+L'ambiente di sviluppo è stato configurato su sistema operativo Windows, utilizzando il compilatore \texttt{nvcc} in versione 12.9.86, incluso nel CUDA Toolkit 13.0.
+Il sistema era dotato dei driver NVIDIA in versione 581.57, pienamente compatibili con la versione del toolkit utilizzato.
+
+Per la fase di test e analisi delle prestazioni sono state impiegate due GPU di architettura recente:
+\begin{itemize}
+    \item NVIDIA GeForce RTX 3070 (Compute Capability 8.6)
+    \item NVIDIA GeForce RTX 4060 (Compute Capability 8.9)
+\end{itemize}
+
+\section{Algoritmo}
+L'algoritmo di Smith-Waterman permette di ottenere un allineamento locale ottimale tramite un approccio di programmazione dinamica.
+In questa sezione viene descritto il funzionamento dell'algoritmo, la sua formulazione e la relativa implementazione sequenziale, che farà da riferimento per la successiva versione parallela su GPU.
+
+\subsection{Algoritmo di Smith-Waterman}
+\subsection{Implementazione sequenziale}
+\section{Implementazione su GPU}
+\subsection{Parallelizzazione dell'algoritmo}
+\subsection{Implementazione su GPU}
+\subsection{Ottimizzazione con blocchi}
+\subsection{Ottimizzazione con memoria condivisa (SMEM)}
+\subsection{Ottimizzazione con warp e coalescenza}
+\subsection{Analisi delle prestazioni e comparazione}
+\section{Conclusione}
 
 \end{document}
