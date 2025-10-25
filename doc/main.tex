@@ -27,13 +27,12 @@
 
 \begin{document}
 \lstset{
-language=Python,
+language=C++,
 basicstyle=\fontfamily{pcr}\footnotesize,
-comment=[l]{\#},
 commentstyle=\color{OliveGreen}\ttfamily,
 keywordstyle=\color{NavyBlue}\bfseries,
 numberstyle=\tiny\color{Gray},
-ndkeywordstyle=\bfseries,
+%ndkeywordstyle=\bfseries,
 numbers=left
 }
 \maketitle
@@ -80,18 +79,96 @@ Lo sviluppo del progetto è stato condotto utilizzando il linguaggio CUDA C, sfr
 L'ambiente di sviluppo è stato configurato su sistema operativo Windows, utilizzando il compilatore \texttt{nvcc} in versione 12.9.86, incluso nel CUDA Toolkit 13.0.
 Il sistema era dotato dei driver NVIDIA in versione 581.57, pienamente compatibili con la versione del toolkit utilizzato.
 
-Per la fase di test e analisi delle prestazioni sono state impiegate due GPU di architettura recente:
-\begin{itemize}
-    \item NVIDIA GeForce RTX 3070 (Compute Capability 8.6)
-    \item NVIDIA GeForce RTX 4060 (Compute Capability 8.9)
-\end{itemize}
+Per la fase di test e analisi delle prestazioni è stata impiegata una GPU NVIDIA GeForce RTX 3070 (Compute Capability 8.6).
+%Per la fase di test e analisi delle prestazioni sono state impiegate due GPU di architettura recente:
+%\begin{itemize}
+%    \item NVIDIA GeForce RTX 3070 (Compute Capability 8.6)
+%    \item NVIDIA GeForce RTX 4060 (Compute Capability 8.9)
+%\end{itemize}
 
 \section{Algoritmo}
 L'algoritmo di Smith-Waterman permette di ottenere un allineamento locale ottimale tramite un approccio di programmazione dinamica.
 In questa sezione viene descritto il funzionamento dell'algoritmo, la sua formulazione e la relativa implementazione sequenziale, che farà da riferimento per la successiva versione parallela su GPU.
 
 \subsection{Algoritmo di Smith-Waterman}
+L'algoritmo di Smith-Waterman consente di ottenere un allineamento locale ottimale tra due sequenze, identificando le regioni di massima somiglianza.
+Nell'allineamento vengono considerati tre tipi di operazioni: corrispondenze o sostituzioni, inserzioni e delezioni.
+Le inserzioni e le delezioni introducono dei "gap" che consentono di allineare correttamente regioni non perfettamente coincidenti tra le sequenze.
+
+L'algoritmo utilizza la tecnica di programmazione dinamica per costruire la matrice di sostituzione in modo da assegnare un punteggio in base ai possibili allineamenti delle sequenze considerate. La soluzione viene poi ricostruita partendo dall'allineamento con il punteggio più alto.
+
+Si articola in quattro fasi principali:
+\begin{itemize}
+    \item \textbf{Definizione del modello di punteggio e penalità}\\
+    Ogni coppia di basi (o amminoacidi, nel caso di sequenze proteiche) riceve un punteggio in base alla corrispondenza: le corrispondenze esatte vengono premiate con valori positivi, mentre le sostituzioni ottengono punteggi inferiori o negativi.
+    La scelta dello schema di penalità dipende dal tipo di sequenza analizzata e dagli obiettivi dello studio.
+
+    \item \textbf{Inizializzazione della matrice dei punteggi}\\
+    Si costruisce una matrice bidimensionale di dimensioni pari a $(m+1) \times (n+1)$, dove m e n rappresentano le lunghezze delle due sequenze.
+    Tutti gli elementi della prima riga e della prima colonna vengono inizializzati a zero.
+    Questa scelta consente all'allineamento di iniziare in qualsiasi posizione delle sequenze e garantisce che i gap iniziali non siano penalizzati.
+
+    \item \textbf{Calcolo dei punteggi (fase di riempimento della matrice)}\\
+    La matrice viene riempita procedendo da sinistra verso destra e dall'alto verso il basso.
+    Per ogni cella si considerano tre possibili punteggi:
+    \begin{itemize}
+        \item il punteggio diagonale (corrispondente a match/mismatch),
+        \item il punteggio proveniente da sinistra (introduzione di un gap nella sequenza verticale),
+        \item il punteggio proveniente dall'alto (introduzione di un gap nella sequenza orizzontale).
+    \end{itemize}
+    Il valore della cella viene impostato come il massimo tra questi tre valori e zero, così da eliminare i contributi negativi e limitare l'allineamento a regioni localmente simili.
+
+    \item \textbf{Traceback (ricostruzione dell'allineamento)}\\
+    Una volta completato il riempimento della matrice, si identifica la cella con il punteggio massimo.
+    A partire da essa, si effettua un traceback seguendo la direzione dei punteggi che hanno contribuito al valore corrente (diagonale, sinistra o alto), fino a raggiungere una cella con valore zero.
+    Il percorso così ottenuto rappresenta l'allineamento locale ottimale.
+    È inoltre possibile individuare allineamenti secondari ripetendo il processo di traceback a partire dai punteggi massimi rimanenti.
+\end{itemize}
+
+Grazie a questa formulazione l'algoritmo di Smith-Waterman garantisce la massima accuratezza possibile nell'allineamento locale.
+Tuttavia, la sua complessità computazionale quadratica in funzione della lunghezza delle sequenze ($O(m \cdot n)$) ne limita l'applicabilità diretta su dataset di grandi dimensioni, rendendo necessarie strategie di ottimizzazione e parallelizzazione.
 \subsection{Implementazione sequenziale}
+\begin{lstlisting}
+void cpu_alignment(
+                sw_mat* h,
+                string seq_1,
+                string seq_2,
+                int seq_1_length,
+                int seq_2_length
+                ) {
+    for(int i = 1; i < seq_1_length; ++i) {
+        for (int j = 1; j < seq_2_length; ++j) {
+            bool match = seq_1[i] == seq_2[j];
+            int d = h[INDEX(i - 1, j - 1, seq_2_length)].value +
+                            (match ? MATCH : MISMATCH);
+            int u = h[INDEX(i - 1, j, seq_2_length)].value + GAP;
+            int l = h[INDEX(i, j - 1, seq_2_length)].value + GAP;
+            int result = max(max(0, d), max(u, l));
+            
+            sw_mat* h_current = &h[INDEX(i, j, seq_2_length)];
+            h_current->value = result;
+
+            if (result == 0)    h_current->dir = STOP;
+            else if (result == d)   h_current->dir = DIAG;
+            else if (result == u)   h_current->dir = UP;
+            else if (result == l)   h_current->dir = LEFT;
+        }
+    }
+}
+\end{lstlisting}
+
+Per questa implementazione sequenziale sono stati scelti i seguenti punteggi e penalità secondo basi empiriche e di pratica comune:
+\begin{itemize}
+    \item corrispondenza 3
+    \item differenza -3
+    \item gap -2
+\end{itemize}
+
+La matrice è implementata in un array monodimensionale, per garantire coerenza e coesione con i successivi algoritmi paralleli, e l'accesso avviene attraverso una macro, definita di seguito, che linearizza l'indice a partire da riga, colonna e lunghezza della sequenza disposta lungo le colonne.
+
+Le due sequenze sono interscambiabili, in quanto l'obiettivo è quello di trovare degli allineamenti locali che sono ambivalenti, ma nel codice si è scelto, per motivi di test e chiarezza, di rifersi alle sequenze con nomi quali \texttt{main\_sequence} e \texttt{sequence} (oppure come \texttt{sequence\_1} e \texttt{sequence\_2}), mantenendo sempre la \texttt{main\_sequence} (o \texttt{sequence\_1}, solitamente la stringa più lunga) lungo le righe e la \texttt{sequence} (o \texttt{sequence\_2}) lungo le colonne.
+
+La matrice viene, quindi, riempita 
 \section{Implementazione su GPU}
 \subsection{Parallelizzazione dell'algoritmo}
 \subsection{Implementazione su GPU}
