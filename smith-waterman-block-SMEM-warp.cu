@@ -9,8 +9,8 @@ using namespace std;
 #define INDEX(row, col, stride) ( (row) * (stride) + (col) )
 #define INDEX_W(row, col, stride) ( (col) * (stride) + (row) )
 
-#define THREADS 1024
-#define THREADS_W 32
+#define THREADS 512
+#define THREADS_W 64
 
 #define MATCH 3
 #define MISMATCH -3
@@ -292,7 +292,7 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2_char, int 
 
     int left_value = h[INDEX_W(i, j - 1, seq_1_length)].value;
     int diag_value = __shfl_up_sync(0xFFFFFFFF, left_value, 1);
-    if (threadIdx.x == 0) diag_value = h[INDEX_W(i - 1, j - 1, seq_1_length)].value;
+    if (threadIdx.x % 32 == 0) diag_value = h[INDEX_W(i - 1, j - 1, seq_1_length)].value;
 
     bool match = seq_1[i] == seq_2_char;
     int d = diag_value + (match * MATCH + (1 - match) * MISMATCH);

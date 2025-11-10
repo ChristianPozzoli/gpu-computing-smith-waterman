@@ -166,9 +166,14 @@ Per questa implementazione sequenziale sono stati scelti i seguenti punteggi e p
 
 La matrice è implementata in un array monodimensionale, per garantire coerenza e coesione con i successivi algoritmi paralleli, e l'accesso avviene attraverso una macro, definita di seguito, che linearizza l'indice a partire da riga, colonna e lunghezza della sequenza disposta lungo le colonne.
 
-Le due sequenze sono interscambiabili, in quanto l'obiettivo è quello di trovare degli allineamenti locali che sono ambivalenti, ma nel codice si è scelto, per motivi di test e chiarezza, di rifersi alle sequenze con nomi quali \texttt{main\_sequence} e \texttt{sequence} (oppure come \texttt{sequence\_1} e \texttt{sequence\_2}), mantenendo sempre la \texttt{main\_sequence} (o \texttt{sequence\_1}, solitamente la stringa più lunga) lungo le righe e la \texttt{sequence} (o \texttt{sequence\_2}) lungo le colonne.
+\begin{lstlisting}
+#define INDEX(row, col, stride) ( (row) * (stride) + (col) )
+\end{lstlisting}
+
+Le due sequenze sono interscambiabili, in quanto l'obiettivo è quello di trovare degli allineamenti locali, quindi ambivalenti, ma nel codice si è scelto, per motivi di test e chiarezza, di rifersi alle sequenze con nomi quali \texttt{main\_sequence} e \texttt{sequence} (oppure come \texttt{sequence\_1} e \texttt{sequence\_2}), mantenendo sempre la \texttt{main\_sequence} (o \texttt{sequence\_1}, solitamente la stringa più lunga) un carattere per riga e la \texttt{sequence} (o \texttt{sequence\_2}) un carattere per colonna.
 
 La matrice viene, quindi, riempita 
+
 \section{Implementazione su GPU}
 \subsection{Parallelizzazione dell'algoritmo}
 \subsection{Implementazione su GPU}
