@@ -190,7 +190,7 @@ void cpu_alignment(sw_mat* h, string seq_1, string seq_2, int seq_1_length, int 
     for(int i = 1; i < seq_1_length; ++i) {
         for (int j = 1; j < seq_2_length; ++j) {
             bool match = seq_1[i] == seq_2[j];
-            int d = h[INDEX(i - 1, j - 1, seq_2_length)].value + (match ? MATCH : MISMATCH);
+            int d = h[INDEX(i - 1, j - 1, seq_2_length)].value + (match * MATCH + (1 - match) * MISMATCH);
             int u = h[INDEX(i - 1, j, seq_2_length)].value + GAP;
             int l = h[INDEX(i, j - 1, seq_2_length)].value + GAP;
             int result = max(max(0, d), max(u, l));
@@ -212,7 +212,7 @@ __global__ void gpu_alignment(sw_mat* h, char* seq_1, char seq_2_char, int seq_1
         return;
     }
     bool match = seq_1[i] == seq_2_char;
-    int d = h[INDEX(i - 1, j - 1, seq_2_length)].value + (match ? MATCH : MISMATCH);
+    int d = h[INDEX(i - 1, j - 1, seq_2_length)].value + (match * MATCH + (1 - match) * MISMATCH);
     int l = h[INDEX(i, j - 1, seq_2_length)].value + GAP;
     int u = 0;
 
@@ -255,7 +255,7 @@ __global__ void gpu_alignment_smem(sw_mat* h, char* seq_1, char seq_2_char, int 
     }
     
     bool match = seq_1[i] == seq_2_char;
-    int d = smem[ti - 1] + (match ? MATCH : MISMATCH);
+    int d = smem[ti - 1] + (match * MATCH + (1 - match) * MISMATCH);
     int l = smem[ti] + GAP;
     int u = 0;
     
@@ -295,7 +295,7 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2_char, int 
     if (threadIdx.x == 0) diag_value = h[INDEX_W(i - 1, j - 1, seq_1_length)].value;
 
     bool match = seq_1[i] == seq_2_char;
-    int d = diag_value + (match ? MATCH : MISMATCH);
+    int d = diag_value + (match * MATCH + (1 - match) * MISMATCH);
     int l = left_value + GAP;
     int u = 0;
     
@@ -338,7 +338,7 @@ __global__ void gpu_alignment_warp_smem(sw_mat* h, char* seq_1, char seq_2_char,
     }
     
     bool match = seq_1[i] == seq_2_char;
-    int d = smem[ti - 1] + (match ? MATCH : MISMATCH);
+    int d = smem[ti - 1] + (match * MATCH + (1 - match) * MISMATCH);
     int l = smem[ti] + GAP;
     int u = 0;
     
@@ -365,7 +365,7 @@ __global__ void gpu_alignment_warp_smem(sw_mat* h, char* seq_1, char seq_2_char,
     else if (result == l)   h_current->dir = LEFT;
 }
 
-__global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+__global__ void gpu_alignment_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
         __syncthreads();
@@ -379,7 +379,7 @@ __global__ void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, char* seq_2, int
     }
 }
 
-__global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+__global__ void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
         __syncthreads();
@@ -394,7 +394,7 @@ __global__ void gpu_alignment_warp_smem_loop(sw_mat* h, char* seq_1, char* seq_2
 }
 
 int main(int argc, char **argv) {
-    string main_sequence = random_dna(20000);
+    string main_sequence = random_dna(18000);
     string sequence = mutate_dna(main_sequence);
 
     int rows = main_sequence.length();
@@ -439,7 +439,7 @@ int main(int argc, char **argv) {
     dim3 block(THREADS_W, 1, 1);
     
     start = seconds();
-    gpu_alignment_warp<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_noSMEM = seconds() - start;
     
@@ -484,7 +484,7 @@ int main(int argc, char **argv) {
     }
     
     start = seconds();
-    gpu_alignment_warp<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_warp_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_warp = seconds() - start;
     
@@ -521,27 +521,27 @@ int main(int argc, char **argv) {
 
     // Results ================================================================
     
-    cout << "|=============RESULTS=============" << endl;
-    cout << "| CPU time:\t\t" << stopCPU << "s" << endl;
-    cout << "| GPU time (parallel):\t" << stopGPU_noSMEM << "s" << endl;
-    cout << "| GPU time (SMEM):\t" << stopGPU_SMEM << "s" << endl;
-    cout << "| GPU time (warp):\t" << stopGPU_warp << "s" << endl;
-    cout << "| GPU time (warp SMEM):\t" << stopGPU_warp_smem << "s" << endl;
-    cout << "|============SPEED UP=============" << endl;
-    cout << "| Over CPU (parallel):\t" << stopCPU / stopGPU_noSMEM << endl;
-    cout << "| Over CPU (SMEM):\t" << stopCPU / stopGPU_SMEM << endl;
-    cout << "| Over CPU (warp):\t" << stopCPU / stopGPU_warp << endl;
-    cout << "| Over CPU (warp SMEM):\t" << stopCPU / stopGPU_warp_smem << endl;
-    cout << "|=================================" << endl;
-    cout << "| Over parallel (SMEM):\t" << stopGPU_noSMEM / stopGPU_SMEM << endl;
-    cout << "| Over parallel (warp):\t" << stopGPU_noSMEM / stopGPU_warp << endl;
+    cout << "|=================RESULTS=================" << endl;
+    cout << "| CPU time:\t\t\t" << stopCPU << "s" << endl;
+    cout << "| GPU time (parallel):\t\t" << stopGPU_noSMEM << "s" << endl;
+    cout << "| GPU time (SMEM):\t\t" << stopGPU_SMEM << "s" << endl;
+    cout << "| GPU time (warp):\t\t" << stopGPU_warp << "s" << endl;
+    cout << "| GPU time (warp SMEM):\t\t" << stopGPU_warp_smem << "s" << endl;
+    cout << "|================SPEED UP=================" << endl;
+    cout << "| Over CPU (parallel):\t\t" << stopCPU / stopGPU_noSMEM << endl;
+    cout << "| Over CPU (SMEM):\t\t" << stopCPU / stopGPU_SMEM << endl;
+    cout << "| Over CPU (warp):\t\t" << stopCPU / stopGPU_warp << endl;
+    cout << "| Over CPU (warp SMEM):\t\t" << stopCPU / stopGPU_warp_smem << endl;
+    cout << "|=========================================" << endl;
+    cout << "| Over parallel (SMEM):\t\t" << stopGPU_noSMEM / stopGPU_SMEM << endl;
+    cout << "| Over parallel (warp):\t\t" << stopGPU_noSMEM / stopGPU_warp << endl;
     cout << "| Over parallel (warp SMEM):\t" << stopGPU_noSMEM / stopGPU_warp_smem << endl;
-    cout << "|=================================" << endl;
-    cout << "| Over SMEM (warp):\t" << stopGPU_SMEM / stopGPU_warp << endl;
+    cout << "|=========================================" << endl;
+    cout << "| Over SMEM (warp):\t\t" << stopGPU_SMEM / stopGPU_warp << endl;
     cout << "| Over SMEM (warp SMEM):\t" << stopGPU_SMEM / stopGPU_warp_smem << endl;
-    cout << "|=================================" << endl;
+    cout << "|=========================================" << endl;
     cout << "| Over warp (warp SMEM):\t" << stopGPU_warp / stopGPU_warp_smem << endl;
-    cout << "|=================================" << endl;
+    cout << "|=========================================" << endl;
     
 	return(0);
 }

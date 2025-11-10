@@ -139,6 +139,35 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2, int seq_1
     else if (result == l)   h_current->dir = LEFT;
 }
 
+__global__ void gpu_alignment_warp_no_branch(sw_mat* h, char* seq_1, char seq_2, int seq_1_length, int seq_2_length, int j) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if(i == 0 || i >= seq_1_length) {
+        return;
+    }
+    bool match = seq_1[i] == seq_2;
+    int d = h[INDEX(i - 1, j - 1, seq_1_length)].value + (match * MATCH + (1 - match) * MISMATCH);
+    int l = h[INDEX(i, j - 1, seq_1_length)].value + GAP;
+    int u = 0;
+    
+    bool stop = false;
+    for(int k = i - 1; k > 0 && !stop; --k) {
+        if(seq_1[k] == seq_2) {
+            u = h[INDEX(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH;
+            stop = true;
+        }
+    }
+    
+    int result = max(max(0, d), max(u, l));
+    
+    sw_mat* h_current = &h[INDEX(i, j, seq_1_length)];
+    h_current->value = result;
+    
+    if (result == 0)    h_current->dir = STOP;
+    else if (result == d)   h_current->dir = DIAG;
+    else if (result == u)   h_current->dir = UP;
+    else if (result == l)   h_current->dir = LEFT;
+}
+
 
 __global__ void gpu_alignment_warp_shuffle(sw_mat* h, char* seq_1, char seq_2, int seq_1_length, int seq_2_length, int j) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -151,7 +180,7 @@ __global__ void gpu_alignment_warp_shuffle(sw_mat* h, char* seq_1, char seq_2, i
     if (threadIdx.x == 0) diag = h[INDEX(i - 1, j - 1, seq_1_length)].value;
 
     bool match = seq_1[i] == seq_2;
-    int d = diag + (match ? MATCH : MISMATCH);
+    int d = diag + (match * MATCH + (1 - match) * MISMATCH);
     int l = left + GAP;
     int u = 0;
     
@@ -181,6 +210,13 @@ __global__ void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, char* seq_2, int
     }
 }
 
+__global__ void gpu_alignment_warp_no_branch_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+    for (int j = 1; j < seq_2_length; ++j) {
+        gpu_alignment_warp_no_branch<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
+        __syncthreads();
+    }
+}
+
 __global__ void gpu_alignment_warp_shuffle_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_shuffle<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
@@ -201,8 +237,9 @@ int main(int argc, char **argv) {
     sw_mat* h = (sw_mat*) malloc(nBytes);
     sw_mat* h1 = (sw_mat*) malloc(nBytes);
     sw_mat* h2 = (sw_mat*) malloc(nBytes);
+    sw_mat* h3 = (sw_mat*) malloc(nBytes);
     
-    sw_mat *d_h1, *d_h2;
+    sw_mat *d_h1, *d_h2, *d_h3;
     char *d_main_seq, *d_seq;
     
     for(int i = 0; i < size; ++i) {
@@ -212,11 +249,13 @@ int main(int argc, char **argv) {
     
     CHECK(cudaMalloc((void** )&d_h1, nBytes));
     CHECK(cudaMalloc((void** )&d_h2, nBytes));
+    CHECK(cudaMalloc((void** )&d_h3, nBytes));
     CHECK(cudaMalloc((void** )&d_main_seq, rows * sizeof(char)));
     CHECK(cudaMalloc((void** )&d_seq, cols * sizeof(char)));
 
     CHECK(cudaMemcpy(d_h1, h, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_h2, h, nBytes, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(d_h3, h, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_main_seq, main_sequence.c_str(), rows * sizeof(char), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_seq, sequence.c_str(), cols * sizeof(char), cudaMemcpyHostToDevice));
 
@@ -236,12 +275,18 @@ int main(int argc, char **argv) {
     double stopGPU_warp = seconds() - start;
     
     start = seconds();
-    gpu_alignment_warp_shuffle_loop<<<1, 1>>>(d_h2, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_warp_no_branch_loop<<<1, 1>>>(d_h2, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    CHECK(cudaDeviceSynchronize());
+    double stopGPU_no_branch = seconds() - start;
+    
+    start = seconds();
+    gpu_alignment_warp_shuffle_loop<<<1, 1>>>(d_h3, d_main_seq, d_seq, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_shuffle = seconds() - start;
         
     CHECK(cudaMemcpy(h1, d_h1, nBytes, cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(h2, d_h2, nBytes, cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(h3, d_h3, nBytes, cudaMemcpyDeviceToHost));
 
     // Traceback
     /*
@@ -256,6 +301,7 @@ int main(int argc, char **argv) {
     for(int i = 0; i < size && !err; ++i) {
         err = h[i].value != h1[i].value || h[i].dir != h1[i].dir;
         err |= h[i].value != h2[i].value || h[i].dir != h2[i].dir;
+        err |= h[i].value != h3[i].value || h[i].dir != h3[i].dir;
     }
     
     if(err) {
@@ -266,11 +312,14 @@ int main(int argc, char **argv) {
     cout << "|=============RESULTS=============" << endl;
     cout << "| CPU time:\t\t" << stopCPU << "s" << endl;
     cout << "| GPU time (warp):\t" << stopGPU_warp << "s" << endl;
+    cout << "| GPU time (no branch):\t" << stopGPU_no_branch << "s" << endl;
     cout << "| GPU time (shuffle):\t" << stopGPU_shuffle << "s" << endl;
     cout << "|============SPEED UP=============" << endl;
     cout << "| Over CPU (warp):\t" << stopCPU / stopGPU_warp << endl;
+    cout << "| Over CPU (no branch):\t" << stopCPU / stopGPU_no_branch << endl;
     cout << "| Over CPU (shuffle):\t" << stopCPU / stopGPU_shuffle << endl;
     cout << "|=================================" << endl;
+    cout << "| Over warp (no branch):" << stopGPU_warp / stopGPU_no_branch << endl;
     cout << "| Over warp (shuffle):\t" << stopGPU_warp / stopGPU_shuffle << endl;
     cout << "|=================================" << endl;
 
