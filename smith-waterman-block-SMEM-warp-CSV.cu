@@ -10,7 +10,7 @@ using namespace std;
 #define INDEX_W(row, col, stride) ( (size_t)(col) * (size_t)(stride) + (size_t)(row) )
 
 #define FILENAME "results"
-#define TEST_REPETITION 10
+#define TEST_REPETITION 20
 
 #define MATCH 3
 #define MISMATCH -3
@@ -394,8 +394,8 @@ void runKernel(
 
 void runTests(const string& filename)
 {
-    std::vector<uint16_t> inputSizes = {1000, 5000, 10000, 15000, 18000, 20000};
-    std::vector<uint16_t> blockSizes = {32, 64, 128, 256, 512, 1024};
+    std::vector<uint16_t> inputSizes = {25000};//{1000, 5000, 10000, 15000, 18000, 20000};
+    std::vector<uint16_t> blockSizes = {1024};//{32, 64, 128, 256, 512, 1024};
     std::vector<void(*)(sw_mat*, char*, string, uint16_t, uint16_t, uint16_t, uint16_t, int)> kernels = {gpu_alignment_loop, gpu_alignment_smem_loop, gpu_alignment_warp_loop, gpu_alignment_warp_smem_loop};
     std::vector<bool> warpCheckErrorValues = {false, false, true, true};
     std::vector<string> kernelNames = {"parallel", "smem", "warp", "warp_smem"};

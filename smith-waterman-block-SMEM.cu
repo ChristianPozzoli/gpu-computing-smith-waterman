@@ -191,14 +191,12 @@ __global__ void gpu_alignment_smem(sw_mat* h, char* seq_1, char seq_2_char, int 
 void gpu_alignment_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        cudaDeviceSynchronize();
     }
 }
 
 void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_smem<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        cudaDeviceSynchronize();
     }
 }
 
