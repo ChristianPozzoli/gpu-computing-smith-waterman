@@ -19,6 +19,7 @@
     colorlinks=true,
     linktoc=all,
     linkcolor=black,
+    citecolor=black,
 }
 
 \title{Algoritmo parallelo di Smith-Waterman per allineamento di sequenze DNA}
@@ -109,7 +110,15 @@ Si articola in quattro fasi principali:
     Questa scelta consente all'allineamento di iniziare in qualsiasi posizione delle sequenze e garantisce che i gap iniziali non siano penalizzati.
 
     \item \textbf{Calcolo dei punteggi (fase di riempimento della matrice)}\\
-    La matrice viene riempita procedendo da sinistra verso destra e dall'alto verso il basso.
+    $$
+    H_{i,j} = \max
+    \begin{Bmatrix}
+    0 \\
+    H_{i-1,j-1} + S(a_i, b_j) \\
+    H_{i-1,j} + G \\
+    H_{i,j-1} + G
+    \end{Bmatrix}
+    $$
     Per ogni cella si considerano tre possibili punteggi:
     \begin{itemize}
         \item il punteggio diagonale (corrispondente a match/mismatch),
@@ -127,6 +136,7 @@ Si articola in quattro fasi principali:
 
 Grazie a questa formulazione l'algoritmo di Smith-Waterman garantisce la massima accuratezza possibile nell'allineamento locale.
 Tuttavia, la sua complessità computazionale quadratica in funzione della lunghezza delle sequenze ($O(m \cdot n)$) ne limita l'applicabilità diretta su dataset di grandi dimensioni, rendendo necessarie strategie di ottimizzazione e parallelizzazione.
+
 \subsection{Implementazione sequenziale}
 \begin{lstlisting}
 void cpu_alignment(
@@ -172,15 +182,57 @@ La matrice è implementata in un array monodimensionale, per garantire coerenza 
 
 Le due sequenze sono interscambiabili, in quanto l'obiettivo è quello di trovare degli allineamenti locali, quindi ambivalenti, ma nel codice si è scelto, per motivi di test e chiarezza, di rifersi alle sequenze con nomi quali \texttt{main\_sequence} e \texttt{sequence} (oppure come \texttt{sequence\_1} e \texttt{sequence\_2}), mantenendo sempre la \texttt{main\_sequence} (o \texttt{sequence\_1}, solitamente la stringa più lunga) un carattere per riga e la \texttt{sequence} (o \texttt{sequence\_2}) un carattere per colonna.
 
-La matrice viene, quindi, riempita 
+La matrice è, quindi, strutturata come array di \texttt{struct sw\_mat} definita come struttura ausiliaria composta da un elemento numerico che rappresenta il punteggio dell'elemento e un enumerazione che rappresenta la direzione da cui deriva il punteggio, cioè \texttt{DIAG, UP, LEFT} come la direzione dell'elemento che ha fornito la combinazione di punteggio massima, oppure \texttt{STOP} ad indicare una casella vuota. La scansione e la popolazione della matrice avviene da sinistra verso destra e dall'alto verso il basso e ogni cella dipende dal valore precedente sulla stessa riga, precedente sulla stessa colonna e precedente sulla stessa diagonale, in modo da valutare la combinazione di punteggio maggiore.
 
-\section{Implementazione su GPU}
+Non verrà discussa in maniera approfondita la logica di traceback, in quanto non è parte dell'argomento di studio. L'algoritmo che ricostruisce la soluzione, come discusso nei capitoli precedenti, parte dal valore maggiore della matrice e ricostruisce la soluzione seguendo il campo \texttt{dir} della struct di cui è composta la matrice fino al primo \texttt{STOP}.
+
+Per valutare la correttezza degli algoritmi paralleli, però, non viene presa in considerazione la soluzione, ma la matrice stessa per le seguenti ragioni: è più semplice e diretto valutare l'uguaglianza di due matrici; non sempre la soluzione è unica; è possibile arrivare alla stessa soluzione apparente (sequenza di basi) seguendo due percorsi diversi.
+In questo contesto la correttezza è determinata dagli stessi valori e dallo stesso percorso delle soluzioni, quindi dalla stessa matrice.
+
+\section{Su GPU}
 \subsection{Parallelizzazione dell'algoritmo}
+
+L'algoritmo di Smith-Waterman, nella sua formulazione classica (come discusso nel Capitolo 2), si basa sulla programmazione dinamica per calcolare il punteggio di allineamento $H_{i,j}$ per ogni cella della matrice $H$.
+La natura della programmazione dinamica introduce una dipendenza rigorosa nel calcolo di $H_{i,j}$: il valore di ogni cella dipende dai valori calcolati nelle celle adiacenti precedentemente completate (in alto, a sinistra e in diagonale).
+
+Questa interdipendenza impedisce il calcolo parallelo dell'intera matrice $H$, rendendo l'algoritmo naturalmente sequenziale nella sua implementazione. Per sfruttare le architetture parallele, è necessario identificare e strutturare la computazione in modo da massimizzare l'indipendenza e il parallelismo.
+
+Esistono due approcci principali per affrontare questa dipendenza e parallelizzare l'algoritmo:
+\begin{itemize}
+    \item \textbf{Indipendenza antidiagonale:} Osservando la matrice, si nota che tutte le celle situate sulla stessa antidiagonale dipendono unicamente dalle celle calcolate sulle antidiagonali precedenti. Quindi, tutte le celle su una singola antidiagonale possono essere calcolate in parallelo.
+    %Questa strategia richiede $O(m+n)$ passaggi seriali, dove $m$ e $n$ sono le lunghezze delle sequenze. In ogni passaggio, $O(\min(i, m+n-i))$ celle possono essere elaborate simultaneamente.
+    \item \textbf{Indipendenza della singola colonna:} Questo approccio tenta di parallelizzare il calcolo degli elementi all'interno di una singola colonna (o riga). Sebbene ogni cella $[i,j]$ dipenda intrinsecamente da $[i-1, j]$ (elemento immediatamente sopra) e $[i, j-1]$ (elemento immediatamente a sinistra), l'analisi dell'algoritmo di Smith-Waterman con l'uso di ottimizzazioni può permettere di ristrutturare il calcolo per minimizzare o eliminare la dipendenza verticale tra le righe $i$ e $i-1$ per una colonna fissa $j$. L'obiettivo è calcolare tutti gli elementi della colonna $j$ in parallelo, una volta che la colonna $j-1$ è stata completamente calcolata.
+\end{itemize}
+
+Nel contesto di questo progetto di calcolo su GPU, si è scelto di adottare la strategia basata sull'indipendenza della singola colonna. Questa scelta è motivata da diversi fattori pratici e computazionali:
+
+\begin{itemize}
+    \item \textbf{Massimizzazione del parallelismo per colonna:} Assegnare un thread (o un blocco di thread) alla computazione di tutti gli elementi di una colonna offre un elevato e uniforme grado di parallelismo, specialmente per sequenze lunghe, semplificando la gestione del carico di lavoro e la mappatura tra thread e dati.
+    \item \textbf{Sfruttamento della coalescenza:} L'accesso ai dati lungo una colonna è fondamentale per le prestazioni su GPU. Mantenere l'accesso ai dati in modo sequenziale favorisce la coalescenza degli accessi alla memoria globale.
+    \item \textbf{Semplicità di sincronizzazione:} L'intera operazione si riduce a $n$ passaggi sequenziali (il numero di colonne). Tra un passaggio e l'altro è necessaria una barriera di sincronizzazione, rendendo la logica di controllo più semplice rispetto alla complessa gestione delle sincronizzazioni tra richiesta dall'approccio antidiagonale puro.
+\end{itemize}
+
+L'approccio della soluzione si basa sull'iterazione seriale sulle colonne della matrice e il calcolo parallelo degli elementi lungo la colonna. L'elemento a sinistra ($H_{i, j-1}$) è già disponibile nella matrice risultante dal lancio del kernel precedente, così come l'elemento sulla diagonale ($H_{i-1, j-1}$), poiché disponibili nella colonna precedente.
+La cella superiore, invece, è la dipendenza più critica. Per eliminarla e consentire il calcolo in parallelo lungo la colonna, si fa affidamento sul concetto di gap e sul fatto che il valore stesso della cella superiore sia necessariamente determinato da dei gap verticali a partire da un elemento diagonale o iniziale, in quanto il valore sulla colonna attuale deriva da una combinazione di spostamenti verticali e diagonali.
+Il calcolo si riconduce a una catena di dipendenze verso l'alto e prosegue verso l'alto fino a quando si raggiunge un elemento $H_{k,j}$ la cui dipendenza non è verso l'alto, ma verso la cella diagonale (ovvero, c'è un match tra i caratteri), oppure si raggiunge l'inizio della matrice \cite{chen_new_2010}.
+Questo permette di ricavare il valore da una cella $H_{k-1, j-1}$, della colonna precedente, purché $S_1[k] = S_2[j]$ sia il primo match trovato salendo da $i$ a $1$:
+$$
+U = H_{k-1, j-1} + (i-k) \cdot \text{GAP} + \text{MATCH}
+$$
+Questo calcolo, pur essendo più intensivo in termini di istruzioni, elimina la dipendenza verticale tra $H_{i,j}$ e $H_{i-1, j}$, rendendo tutti i calcoli di lungo la colonna indipendenti gli uni dagli altri.
+
 \subsection{Implementazione su GPU}
+\begin{enumerate}
+    \item \textbf{Serializzazione sulle Colonne ($j$):} Il loop esterno che avanza colonna per colonna è gestito sul lato CPU (Host). Ad ogni iterazione $j$, un kernel GPU viene lanciato per calcolare l'intera colonna $j$.
+    \item \textbf{Parallelizzazione sulle Righe ($i$):} All'interno del kernel, il thread con ID $TID$ viene mappato all'elemento $H_{i,j}$ con $i = TID + 1$. Tutti i thread calcolano simultaneamente i loro rispettivi $H_{i,j}$.
+\end{enumerate}
 \subsection{Ottimizzazione con blocchi}
 \subsection{Ottimizzazione con memoria condivisa (SMEM)}
 \subsection{Ottimizzazione con warp e coalescenza}
 \subsection{Analisi delle prestazioni e comparazione}
 \section{Conclusione}
 
+\newpage
+\bibliographystyle{plain}
+\bibliography{bibliography}
 \end{document}

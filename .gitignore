@@ -17,3 +17,5 @@
 *.out
 *.toc
 *.synctex.gz
+*.bbl
+*.blg
