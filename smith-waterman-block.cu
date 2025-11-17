@@ -139,57 +139,6 @@ __global__ void gpu_alignment(sw_mat* h, char* seq_1, char seq_2_char, int seq_1
     else if (result == l)   h_current->dir = LEFT;
 }
 
-__global__ void gpu_alignment_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
-    for (int j = 1; j < seq_2_length; ++j) {
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
-    }
-}
-
-
-__global__ void gpu_alignment_loop_unroll(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
-    int j = 1;
-    while (j < seq_2_length / 32) {
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+1], seq_1_length, seq_2_length, j+1 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+2], seq_1_length, seq_2_length, j+2 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+3], seq_1_length, seq_2_length, j+3 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+4], seq_1_length, seq_2_length, j+4 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+5], seq_1_length, seq_2_length, j+5 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+6], seq_1_length, seq_2_length, j+6 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+7], seq_1_length, seq_2_length, j+7 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+8], seq_1_length, seq_2_length, j+8 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+9], seq_1_length, seq_2_length, j+9 );__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+10], seq_1_length, seq_2_length, j+10);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+11], seq_1_length, seq_2_length, j+11);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+12], seq_1_length, seq_2_length, j+12);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+13], seq_1_length, seq_2_length, j+13);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+14], seq_1_length, seq_2_length, j+14);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+15], seq_1_length, seq_2_length, j+15);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+16], seq_1_length, seq_2_length, j+16);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+17], seq_1_length, seq_2_length, j+17);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+18], seq_1_length, seq_2_length, j+18);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+19], seq_1_length, seq_2_length, j+19);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+20], seq_1_length, seq_2_length, j+20);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+21], seq_1_length, seq_2_length, j+21);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+22], seq_1_length, seq_2_length, j+22);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+23], seq_1_length, seq_2_length, j+23);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+24], seq_1_length, seq_2_length, j+24);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+25], seq_1_length, seq_2_length, j+25);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+26], seq_1_length, seq_2_length, j+26);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+27], seq_1_length, seq_2_length, j+27);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+28], seq_1_length, seq_2_length, j+28);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+29], seq_1_length, seq_2_length, j+29);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+30], seq_1_length, seq_2_length, j+30);__syncthreads();
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j+31], seq_1_length, seq_2_length, j+31);__syncthreads();
-        j += 32;
-    }
-    while(j < seq_2_length) {
-        gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);__syncthreads();
-        ++j;
-    }
-}
-
 int main(int argc, char **argv) {
     string main_sequence = MAIN_SEQUENCE;
     string sequence = SEQUENCE;
@@ -203,9 +152,8 @@ int main(int argc, char **argv) {
     sw_mat* h = (sw_mat*) malloc(nBytes); // Result CPU
     sw_mat* h1 = (sw_mat*) malloc(nBytes); // Result GPU no SMEM
     sw_mat* h2 = (sw_mat*) malloc(nBytes); // Result GPU SMEM
-    sw_mat* h3 = (sw_mat*) malloc(nBytes); // Result GPU SMEM
     
-    sw_mat *d_h1, *d_h2, *d_h3;
+    sw_mat *d_h1, *d_h2;
     char *d_main_seq, *d_seq;
     
     for(int i = 0; i < size; ++i) {
@@ -215,13 +163,10 @@ int main(int argc, char **argv) {
     
     CHECK(cudaMalloc((void** )&d_h1, nBytes));
     CHECK(cudaMalloc((void** )&d_h2, nBytes));
-    CHECK(cudaMalloc((void** )&d_h3, nBytes));
     CHECK(cudaMalloc((void** )&d_main_seq, rows * sizeof(char)));
     CHECK(cudaMalloc((void** )&d_seq, cols * sizeof(char)));
 
     CHECK(cudaMemcpy(d_h1, h, nBytes, cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(d_h2, h, nBytes, cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(d_h3, h, nBytes, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_main_seq, main_sequence.c_str(), rows * sizeof(char), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(d_seq, sequence.c_str(), cols * sizeof(char), cudaMemcpyHostToDevice));
 
@@ -235,27 +180,22 @@ int main(int argc, char **argv) {
 
     dim3 grid(blocks_n, 1, 1);
     dim3 block(THREADS, 1, 1);
-    
     start = seconds();
     for(int j = 1; j < cols; ++j) {
         gpu_alignment<<<grid, block>>>(d_h1, d_main_seq, sequence[j], rows, cols, j);
         CHECK(cudaDeviceSynchronize());
     }
     double stopGPU = seconds() - start;
-    
+
     start = seconds();
-    gpu_alignment_loop<<<1, 1>>>(d_h2, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    for(int j = 1; j < cols; ++j) {
+        gpu_alignment<<<grid, block>>>(d_h2, d_main_seq, sequence[j], rows, cols, j);
+    }
     CHECK(cudaDeviceSynchronize());
-    double stopGPU_loop = seconds() - start;
-    
-    start = seconds();
-    gpu_alignment_loop_unroll<<<1, 1>>>(d_h3, d_main_seq, d_seq, rows, cols, grid.x, block.x);
-    CHECK(cudaDeviceSynchronize());
-    double stopGPU_loop_unroll = seconds() - start;
+    double stopGPU_nosync = seconds() - start;
     
     CHECK(cudaMemcpy(h1, d_h1, nBytes, cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(h2, d_h2, nBytes, cudaMemcpyDeviceToHost));
-    CHECK(cudaMemcpy(h3, d_h3, nBytes, cudaMemcpyDeviceToHost));
 
     // Traceback
     /*
@@ -269,7 +209,6 @@ int main(int argc, char **argv) {
     for(int i = 0; i < size && !err; ++i) {
         err = h[i].value != h1[i].value || h[i].dir != h1[i].dir;
         err |= h[i].value != h2[i].value || h[i].dir != h2[i].dir;
-        err |= h[i].value != h3[i].value || h[i].dir != h3[i].dir;
     }
 
     if(err) {
@@ -278,17 +217,14 @@ int main(int argc, char **argv) {
     }
     
     cout << "|=============RESULTS=============" << endl;
-    cout << "| CPU time:\t\t" << stopCPU << "s" << endl;
-    cout << "| GPU time:\t\t" << stopGPU << "s" << endl;
-    cout << "| GPU time (loop):\t" << stopGPU_loop << "s" << endl;
-    cout << "| GPU time (unroll):\t" << stopGPU_loop_unroll << "s" << endl;
+    cout << "| CPU time:\t\t  " << stopCPU << "s" << endl;
+    cout << "| GPU time:\t\t  " << stopGPU << "s" << endl;
+    cout << "| GPU time (stream-sync): " << stopGPU_nosync << "s" << endl;
     cout << "|============SPEED UP=============" << endl;
-    cout << "| Over CPU (parallel):\t" << stopCPU / stopGPU << endl;
-    cout << "| Over CPU (loop):\t" << stopCPU / stopGPU_loop << endl;
-    cout << "| Over CPU (unroll):\t" << stopCPU / stopGPU_loop_unroll << endl;
+    cout << "| Over CPU:\t\t  " << stopCPU / stopGPU << endl;
+    cout << "| Over CPU (stream-sync): " << stopCPU / stopGPU_nosync << endl;
     cout << "|=================================" << endl;
-    cout << "| Over parallel (loop):\t" << stopGPU / stopGPU_loop << endl;
-    cout << "| Over parallel (unroll):\t" << stopGPU / stopGPU_loop_unroll << endl;
+    cout << "| Over GPU (stream-sync): " << stopGPU / stopGPU_nosync << endl;
     cout << "|=================================" << endl;
     
 	return(0);

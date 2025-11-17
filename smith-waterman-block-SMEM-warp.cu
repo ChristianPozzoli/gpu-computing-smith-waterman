@@ -299,12 +299,10 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2_char, int 
     int l = left_value + GAP;
     int u = 0;
     
-    bool stop = false;
-    for(int k = i - 1; k > 0 && !stop; --k) {
-        if(seq_1[k] == seq_2_char) {
-            u = h[INDEX_W(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH;
-            stop = true;
-        }
+    bool match_k = false;
+    for(int k = i - 1; k > 0 && !match_k; --k) {
+        match_k = seq_1[k] == seq_2_char;
+        u = match_k * (h[INDEX_W(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH);
     }
     
     int result = max(max(0, d), max(u, l));
@@ -365,36 +363,36 @@ __global__ void gpu_alignment_warp_smem(sw_mat* h, char* seq_1, char seq_2_char,
     else if (result == l)   h_current->dir = LEFT;
 }
 
-__global__ void gpu_alignment_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_smem<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_warp_smem_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_warp_smem_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_smem<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
 int main(int argc, char **argv) {
-    string main_sequence = random_dna(18000);
+    string main_sequence = random_dna(10000);
     string sequence = mutate_dna(main_sequence);
 
     int rows = main_sequence.length();
@@ -439,7 +437,7 @@ int main(int argc, char **argv) {
     dim3 block(THREADS_W, 1, 1);
     
     start = seconds();
-    gpu_alignment_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_loop(d_h1, d_main_seq, sequence, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_noSMEM = seconds() - start;
     
@@ -456,7 +454,7 @@ int main(int argc, char **argv) {
     // SMEM ===================================================================
     
     start = seconds();
-    gpu_alignment_smem_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_smem_loop(d_h1, d_main_seq, sequence, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_SMEM = seconds() - start;
     
@@ -484,7 +482,7 @@ int main(int argc, char **argv) {
     }
     
     start = seconds();
-    gpu_alignment_warp_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_warp_loop(d_h1, d_main_seq, sequence, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_warp = seconds() - start;
     
@@ -503,7 +501,7 @@ int main(int argc, char **argv) {
     // WARP SMEM ==============================================================
     
     start = seconds();
-    gpu_alignment_warp_smem_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_warp_smem_loop(d_h1, d_main_seq, sequence, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
     double stopGPU_warp_smem = seconds() - start;
     

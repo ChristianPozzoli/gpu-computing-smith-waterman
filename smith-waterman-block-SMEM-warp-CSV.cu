@@ -242,33 +242,31 @@ __global__ void gpu_alignment_warp_smem(sw_mat* h, char* seq_1, char seq_2_char,
     else if (result == l)   h_current->dir = LEFT;
 }
 
-__global__ void gpu_dummy() { return; }
-
-__global__ void gpu_alignment_loop(sw_mat* h, char* seq_1, char* seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
+void gpu_alignment_loop(sw_mat* h, char* seq_1, string seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
+        //cudaDeviceSynchronize();
     }
-    __syncthreads();
 }
 
-__global__ void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, char* seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
+void gpu_alignment_smem_loop(sw_mat* h, char* seq_1, string seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_smem<<<grid, block, smem>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        //cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, char* seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
+void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, string seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        //cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_warp_smem_loop(sw_mat* h, char* seq_1, char* seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
+void gpu_alignment_warp_smem_loop(sw_mat* h, char* seq_1, string seq_2, uint16_t seq_1_length, uint16_t seq_2_length, uint16_t grid, uint16_t block, int smem) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_smem<<<grid, block, smem>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        //cudaDeviceSynchronize();
     }
 }
 
@@ -351,10 +349,10 @@ void appendStringToCSV(const std::string& filename, const std::string& s)
     file.close();
 }
 
-template <typename KernelLoop, typename... Args>
+template <typename... Args>
 
 void runKernel(
-    KernelLoop kernel,
+    void(*kernel_loop)(sw_mat*, char*, string, uint16_t, uint16_t, uint16_t, uint16_t, int),
     const string name,
     sw_mat* h,
     sw_mat* h1,
@@ -373,9 +371,11 @@ void runKernel(
     cudaEventCreate(&stop);
 
     cudaEventRecord(start);
-    kernel<<<1, 1>>>(d_h1, args...);
+    kernel_loop(d_h1, args...);
     cudaEventRecord(stop);
     CHECK(cudaEventSynchronize(stop));
+
+    CHECK(cudaDeviceSynchronize());
     
     CHECK(cudaMemcpy(h1, d_h1, nBytes, cudaMemcpyDeviceToHost));
 
@@ -394,8 +394,12 @@ void runKernel(
 
 void runTests(const string& filename)
 {
-    std::vector<uint16_t> inputSizes = {20000};//, 5000, 10000, 15000, 18000, 20000};
-    std::vector<uint16_t> blockSizes = {32};//{32, 64, 128, 256, 512, 1024};
+    std::vector<uint16_t> inputSizes = {1000, 5000, 10000, 15000, 18000, 20000};
+    std::vector<uint16_t> blockSizes = {32, 64, 128, 256, 512, 1024};
+    std::vector<void(*)(sw_mat*, char*, string, uint16_t, uint16_t, uint16_t, uint16_t, int)> kernels = {gpu_alignment_loop, gpu_alignment_smem_loop, gpu_alignment_warp_loop, gpu_alignment_warp_smem_loop};
+    std::vector<bool> warpCheckErrorValues = {false, false, true, true};
+    std::vector<string> kernelNames = {"parallel", "smem", "warp", "warp_smem"};
+    
     
     for (uint16_t n : inputSizes)
     {
@@ -434,7 +438,7 @@ void runTests(const string& filename)
         CHECK(cudaMemcpy(d_h1, h, nBytes, cudaMemcpyHostToDevice));
         
         cout << "\tCPU [";
-        for(uint8_t i = 0; i < 1/*TEST_REPETITION*/; ++i)
+        for(uint8_t i = 0; i < TEST_REPETITION; ++i)
         {
             double start = seconds();
             cpu_alignment(h, main_sequence, sequence, rows, cols);
@@ -461,80 +465,17 @@ void runTests(const string& filename)
             
             for(uint8_t i = 0; i < TEST_REPETITION; ++i)
             {
-                // PARALLEL ===============================================================
+                for(int k = 0; k < kernels.size(); ++k)
+                {
+                    CHECK(cudaMemcpy(d_h1, empty_h, nBytes, cudaMemcpyHostToDevice)); //Reset
 
-                cout << "\t\tPARALLEL [" << (int)i + 1 << "/" << TEST_REPETITION << "]" << endl;
-                runKernel(
-                    gpu_alignment_loop, "parallel", h, h1, d_h1, nBytes, rows, cols, false,
-                    filename, n, b,
-                    d_main_seq, d_seq, rows, cols, grid.x, block.x, 0
-                );
-
-                bool err = false;
-                int l;
-                for(l = 0; l < size && !err; ++l) {
-                    err = h[l].value != h1[l].value || h[l].dir != h1[l].dir;
+                    cout << "\t\t" << kernelNames[k] <<" [" << (int)i + 1 << "/" << TEST_REPETITION << "]" << endl;
+                    runKernel(
+                        kernels[k], kernelNames[k], h, h1, d_h1, nBytes, rows, cols, warpCheckErrorValues[k],
+                        filename, n, b,
+                        d_main_seq, sequence, rows, cols, grid.x, block.x, smem_size
+                    );
                 }
-                if(err) {
-                    std::ofstream file("debug.txt", std::ios::app);
-                    if (!file.is_open()) {
-                        std::cerr << "Errore: impossibile aprire " << filename << std::endl;
-                        return;
-                    }
-                    
-                    file << l << "\n";
-                    for(int i = l-10; i < l; ++i)
-                    {
-                        file << h[i].value << ",";
-                    }
-                    file << "\n";
-                    for(int i = l-10; i < l; ++i)
-                    {
-                        file << h1[i].value << ",";
-                    }
-                    int i_h = (l - 1) / cols;
-                    int j_h = (l - 1) % cols;
-                    file << "\n" << h[INDEX(i_h - 1, j_h - 1, cols)].value << "\n";
-                    file << h[INDEX(i_h, j_h - 1, cols)].value << "," << h[INDEX(i_h, j_h, cols)].value;
-                    file << "\n" << h1[INDEX(i_h - 1, j_h - 1, cols)].value << "\n";
-                    file << h1[INDEX(i_h, j_h - 1, cols)].value << "," << h1[INDEX(i_h, j_h, cols)].value;
-                    file << "\n\n";
-                    
-                    file.close();
-                }
-                
-                // SMEM ===================================================================
-                
-                cout << "\t\tSMEM [" << (int)i + 1 << "/" << TEST_REPETITION << "]" << endl;
-                runKernel(
-                    gpu_alignment_smem_loop, "smem", h, h1, d_h1, nBytes, rows, cols, false,
-                    filename, n, b,
-                    d_main_seq, d_seq, rows, cols, grid.x, block.x, smem_size
-                );
-                
-                
-                // ========================================================================
-                
-                CHECK(cudaMemcpy(d_h1, empty_h, nBytes, cudaMemcpyHostToDevice)); //Reset
-                
-                // WARP ===================================================================
-                
-                cout << "\t\tWARP [" << (int)i + 1 << "/" << TEST_REPETITION << "]" << endl;
-                runKernel(
-                    gpu_alignment_warp_loop, "warp", h, h1, d_h1, nBytes, rows, cols, true,
-                    filename, n, b,
-                    d_main_seq, d_seq, rows, cols, grid.x, block.x, 0
-                );
-                
-                
-                // WARP SMEM ==============================================================
-                
-                cout << "\t\tWARP SMEM [" << (int)i + 1 << "/" << TEST_REPETITION << "]" << endl;
-                runKernel(
-                    gpu_alignment_warp_smem_loop, "warp_smem", h, h1, d_h1, nBytes, rows, cols, true,
-                    filename, n, b,
-                    d_main_seq, d_seq, rows, cols, grid.x, block.x, smem_size
-                );
                 
                 appendStringToCSV(filename, "\n");
             }
@@ -552,7 +493,9 @@ void runTests(const string& filename)
 int main(int argc, char **argv) {
     const string& filename = makeCSV();
     if(filename == "") return(1);
+    double start = seconds();
     runTests(filename);
-    cout << "Done" << endl;
+    double stop = seconds();
+    cout << "Done (" << (int)(stop - start) << "s)" << endl;
 	return(0);
 }

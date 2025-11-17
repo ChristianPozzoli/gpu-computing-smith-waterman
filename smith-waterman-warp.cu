@@ -149,12 +149,10 @@ __global__ void gpu_alignment_warp_no_branch(sw_mat* h, char* seq_1, char seq_2,
     int l = h[INDEX(i, j - 1, seq_1_length)].value + GAP;
     int u = 0;
     
-    bool stop = false;
-    for(int k = i - 1; k > 0 && !stop; --k) {
-        if(seq_1[k] == seq_2) {
-            u = h[INDEX(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH;
-            stop = true;
-        }
+    bool match_k = false;
+    for(int k = i - 1; k > 0 && !match_k; --k) {
+        match_k = seq_1[k] == seq_2;
+        u = match_k * (h[INDEX(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH);
     }
     
     int result = max(max(0, d), max(u, l));
@@ -184,12 +182,10 @@ __global__ void gpu_alignment_warp_shuffle(sw_mat* h, char* seq_1, char seq_2, i
     int l = left + GAP;
     int u = 0;
     
-    bool stop = false;
-    for(int k = i - 1; k > 0 && !stop; --k) {
-        if(seq_1[k] == seq_2) {
-            u = h[INDEX(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH;
-            stop = true;
-        }
+    bool match_k = false;
+    for(int k = i - 1; k > 0 && !match_k; --k) {
+        match_k = seq_1[k] == seq_2;
+        u = match_k * (h[INDEX(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH);
     }
     
     int result = max(max(0, d), max(u, l));
@@ -203,24 +199,24 @@ __global__ void gpu_alignment_warp_shuffle(sw_mat* h, char* seq_1, char seq_2, i
     else if (result == l)   h_current->dir = LEFT;
 }
 
-__global__ void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_warp_no_branch_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_warp_no_branch_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_no_branch<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
-__global__ void gpu_alignment_warp_shuffle_loop(sw_mat* h, char* seq_1, char* seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
+void gpu_alignment_warp_shuffle_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_shuffle<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        __syncthreads();
+        cudaDeviceSynchronize();
     }
 }
 
@@ -270,20 +266,26 @@ int main(int argc, char **argv) {
     dim3 block(THREADS, 1, 1);
     
     start = seconds();
-    gpu_alignment_warp_loop<<<1, 1>>>(d_h1, d_main_seq, d_seq, rows, cols, grid.x, block.x);
-    CHECK(cudaDeviceSynchronize());
+    gpu_alignment_warp_loop(d_h1, d_main_seq, sequence, rows, cols, grid.x, block.x);
     double stopGPU_warp = seconds() - start;
     
-    start = seconds();
-    gpu_alignment_warp_no_branch_loop<<<1, 1>>>(d_h2, d_main_seq, d_seq, rows, cols, grid.x, block.x);
     CHECK(cudaDeviceSynchronize());
-    double stopGPU_no_branch = seconds() - start;
+    
     
     start = seconds();
-    gpu_alignment_warp_shuffle_loop<<<1, 1>>>(d_h3, d_main_seq, d_seq, rows, cols, grid.x, block.x);
+    gpu_alignment_warp_no_branch_loop(d_h2, d_main_seq, sequence, rows, cols, grid.x, block.x);
+    double stopGPU_no_branch = seconds() - start;
+    
     CHECK(cudaDeviceSynchronize());
+    
+    
+    start = seconds();
+    gpu_alignment_warp_shuffle_loop(d_h3, d_main_seq, sequence, rows, cols, grid.x, block.x);
     double stopGPU_shuffle = seconds() - start;
-        
+    
+    CHECK(cudaDeviceSynchronize());
+    
+    
     CHECK(cudaMemcpy(h1, d_h1, nBytes, cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(h2, d_h2, nBytes, cudaMemcpyDeviceToHost));
     CHECK(cudaMemcpy(h3, d_h3, nBytes, cudaMemcpyDeviceToHost));
