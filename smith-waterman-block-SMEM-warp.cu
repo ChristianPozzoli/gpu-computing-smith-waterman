@@ -299,10 +299,12 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2_char, int 
     int l = left_value + GAP;
     int u = 0;
     
-    bool match_k = false;
-    for(int k = i - 1; k > 0 && !match_k; --k) {
-        match_k = seq_1[k] == seq_2_char;
-        u = match_k * (h[INDEX_W(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH);
+    bool stop = false;
+    for(int k = i - 1; k > 0 && !stop; --k) {
+        if(seq_1[k] == seq_2_char) {
+            u = h[INDEX_W(k - 1, j - 1, seq_1_length)].value + (i - k) * GAP + MATCH;
+            stop = true;
+        }
     }
     
     int result = max(max(0, d), max(u, l));

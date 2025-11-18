@@ -222,17 +222,130 @@ $$
 Questo calcolo, pur essendo più intensivo in termini di istruzioni, elimina la dipendenza verticale tra $H_{i,j}$ e $H_{i-1, j}$, rendendo tutti i calcoli di lungo la colonna indipendenti gli uni dagli altri.
 
 \subsection{Implementazione su GPU}
-\begin{enumerate}
-    \item \textbf{Serializzazione sulle Colonne ($j$):} Il loop esterno che avanza colonna per colonna è gestito sul lato CPU (Host). Ad ogni iterazione $j$, un kernel GPU viene lanciato per calcolare l'intera colonna $j$.
-    \item \textbf{Parallelizzazione sulle Righe ($i$):} All'interno del kernel, il thread con ID $TID$ viene mappato all'elemento $H_{i,j}$ con $i = TID + 1$. Tutti i thread calcolano simultaneamente i loro rispettivi $H_{i,j}$.
-\end{enumerate}
+La computazione della matrice di sostituzione sfrutta la tecnica descritta di parallelizzazione sulle righe. Il loop esterno avanza colonna per colonna e ad ogni iterazione il thread con ID $TID$ viene mappato all'elemento $H_{i,j}$ con $i = TID + 1$. Tutti i thread calcolano simultaneamente i loro rispettivi $H_{i,j}$. Alla fine del singolo ciclo è necessaria una sincronizzazione per garantire che tutti i thread abbiano completato prima di procedere alla colonna successiva.
+\begin{lstlisting}
+__global__ void gpu_alignment(sw_mat* h,
+                            char* seq_1,
+                            char* seq_2,
+                            int seq_1_length,
+                            int seq_2_length)
+{
+    int i = threadIdx.x + 1;
+    for (int j = 1; j < seq_2_length; ++j) {
+        bool match = seq_1[i] == seq_2[j];
+        int d = h[INDEX(i - 1, j - 1, seq_2_length)].value +
+                    (match ? MATCH : MISMATCH);
+        int l = h[INDEX(i, j - 1, seq_2_length)].value +
+                    GAP;
+        int u = 0;
+
+        bool stop = false;
+        for(int k = i - 1; k > 0 && !stop; --k) {
+            if(seq_1[k] == seq_2[j]) {
+                u = h[INDEX(k - 1, j - 1, seq_2_length)].value +
+                    (i - k) * GAP + MATCH;
+                stop = true;
+            }
+        }
+        
+        int result = max(max(0, d), max(u, l));
+        
+        sw_mat* h_current = &h[INDEX(i, j, seq_2_length)];
+        h_current->value = result;
+
+        if (result == 0)    h_current->dir = STOP;
+        else if (result == d)   h_current->dir = DIAG;
+        else if (result == u)   h_current->dir = UP;
+        else if (result == l)   h_current->dir = LEFT;
+
+        __syncthreads();
+    }
+}
+\end{lstlisting}
+
+Questo approccio avviene su un singolo blocco e ha degli evidenti limiti dettati dalla grandezza dell'input da elaborare, in quanto prevede che l'intera stringa di basi sia minore o uguale a 1024 caratteri, cioè il limite di thread per un singolo blocco.
+
+Ai fini di testare l'algoritmo, quest'ultimo è stato applicato a una sequenza di basi di 4500 caratteri allineandola con una sequenza principale di 1024 caratteri, ottenendo uno speedup di media $3.5$ volte rispetto alla versione sequenziale.
+\begin{lstlisting}
+    Output:
+        CPU time: 0.0695081s
+        GPU time: 0.019001s
+        Speed up: 3.65813
+\end{lstlisting}
+    
 \subsection{Ottimizzazione con blocchi}
+Per superare il limite del singolo blocco è possibile dividere la computazione della singola colonna in più blocchi e arrivare così a coprire un input che supera i soli 1024 caratteri. Per farlo, però, è necessario sincronizzare i blocchi in modo che procedano alla colonna successiva soltanto dopo che tutti i thread di tutti i blocchi abbiano finito la di processare la colonna.
+Per garantire questo comportamento si divide, quindi, la computazione tra host e device in modo che l'host gestisca la sincronizzazione tra colonne e il device esegua il kernel sulla singola colonna.
+
+La chiamata a livello host sarà la seguente
+\begin{lstlisting}
+    for(int j = 1; j < cols; ++j) {
+        gpu_alignment<<<grid, block>>>(
+                                    d_h1,
+                                    d_main_seq,
+                                    sequence[j],
+                                    rows,
+                                    cols,
+                                    j);
+        cudaDeviceSynchronize();
+    }
+\end{lstlisting}
+
+L'istruzione \texttt{cudaDeviceSynchronize()} funge da barriera di sincronizzazione tra una colonna e quella successiva, anche se è possibile e vantaggioso sfuttare la sincronizzazione implicita.
+Infatti, togliere la sincronizzazione esplicita non permette ai kernel di sovrapporsi poiché sono implicitamente eseguiti sullo stesso stream di default (non avendone definito nessuno) e vengono automaticamente sincronizzati in modo che possano essere eseguiti in maniera sequenziale. Inoltre, questo tipo di sincronizzazione permette di ottenere dei vantaggi a livello di scheduling automatico e gestione delle risorse, che porta a una maggiore efficienza di esecuzione e tempistiche migliori.
+
+Con queste modifiche, quindi, è possibile estendere le dimensioni dell'input e ottenere uno speedup maggiore.
+Su un input di 4500 caratteri per entrambe le sequenze è possibile ottenere uno speedup in media di $7.5$ volte superiore alla versione sequenziale e $2.2$ volte la versione con la sincronizzazione esplicita.
+\begin{lstlisting}
+    Output:
+        |=============RESULTS=============
+        | CPU time:               0.2919s
+        | GPU time:               0.0845s
+        | GPU time (stream-sync): 0.0375s
+        |============SPEED UP=============
+        | Over CPU:               3.45383
+        | Over CPU (stream-sync): 7.78143
+        |=================================
+        | Over GPU (stream-sync): 2.25299
+        |=================================
+\end{lstlisting}
+
 \subsection{Ottimizzazione con memoria condivisa (SMEM)}
+
+L'algoritmo ora soffre di un collo di bottiglia intrinseco legato alla latenza dell'accesso alla Global Memory, che è notevolmente superiore a quella dei registri o della Shared Memory (SMEM). In particolare, per calcolare ogni cella $H_{i,j}$ della colonna corrente $j$, sono necessari i tre valori provenienti dalla colonna precedente $j-1$: $H_{i,j-1}$ (sinistra), $H_{i-1,j-1}$ (diagonale) e il valore $H_{k-1,j-1}$ utilizzato nel calcolo della versione parallela.
+
+Per mitigare la latenza causata dai continui accessi alla Global Memory per recuperare i dati della colonna $j-1$, si è adottata una strategia di caching tramite la Memoria Condivisa (SMEM).
+
+La Shared Memory è una risorsa accessibile esclusivamente ai thread all'interno dello stesso blocco. Sfruttando questa proprietà, l'ottimizzazione è come segue: i dati più frequentemente riutilizzati sono i punteggi e le direzioni della colonna $j-1$ immediatamente adiacente a quella corrente $j$ e per ogni blocco di thread responsabile di una porzione della colonna $j$, si alloca una regione di Shared Memory, dimensionata per contenere i valori $H_{i,j-1}$ e $H_{i-1,j-1}$ (sinistra e diagonale). Poiché il calcolo di $H_{i,j}$ dipende da $H_{i,j-1}$ (sinistra) e $H_{i-1,j-1}$ (diagonale), e un blocco di thread gestisce un intervallo di righe $i$ da $i_{\min}$ a $i_{\max}$, è necessario caricare i valori $H_{i,j-1}$ per l'intervallo $[i_{\min-1},i_{\max}]$.
+All'inizio dell'esecuzione del kernel per la colonna $j$, ogni thread carica il proprio valore $H_{i,j-1}$ (necessario per il calcolo dal valore a sinistra) dalla Global Memory nella SMEM locale. Un thread specifico all'inizio del blocco deve caricare anche il valore $H_{i_{\min-1},j-1}$ (necessario come elemento diagonale $H_{i-1,j-1}$ per il primo thread del blocco).
+
+Un punto di sincronizzazione (\texttt{\_\_syncthreads()}) è obbligatorio dopo la fase di caricamento per assicurare che tutti i dati della colonna $j-1$ richiesti dal blocco siano stati resi visibili nella SMEM a tutti i thread prima che inizino i calcoli di $H_{i,j}$.
+
+Una volta completato il caricamento, l'elemento $H_{i,j}$ viene calcolato recuperando i valori $H_{i,j-1}$ e $H_{i-1,j-1}$ direttamente dalla Memoria Condivisa a bassa latenza, anche se alcuni valori nel calcolo del valore superiore potrebbero attingere alla Memoria Globale in quanto non sono presenti tutti i dati della colonna precedente inficiando sulle performance generali.
+Questa tecnica non altera l'algoritmo di base, ma lo rende più efficiente, riducendo significativamente il numero di transazioni off-chip e la latenza d'accesso.
+
+Su una prova con input di 4500 caratteri per entrambe le sequenze l'accesso alla memoria globale è avvenuto per 61400 caratteri su circa 2035000 accessi totali, quindi lo $0.3\%$ delle volte.
+Lo speedup medio è di $1.2$ volte la versione senza Shared Memory.
+
+\begin{lstlisting}
+    Output:
+        |=============RESULTS=============
+        | CPU time:             0.299836s
+        | GPU time (no SMEM):   0.047507s
+        | GPU time (SMEM):      0.038001s
+        |============SPEED UP=============
+        | Over CPU (no SMEM):   6.3114
+        | Over CPU (SMEM):      7.8902
+        |=================================
+        | Speed up SMEM:        1.25015
+        |=================================
+\end{lstlisting}
 \subsection{Ottimizzazione con warp e coalescenza}
 \subsection{Analisi delle prestazioni e comparazione}
 \section{Conclusione}
-
+%====================================================================
 \newpage
 \bibliographystyle{plain}
 \bibliography{bibliography}
+%====================================================================
 \end{document}
