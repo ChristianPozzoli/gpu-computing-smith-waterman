@@ -167,14 +167,10 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2_char, uint
     if(i == 0 || i >= seq_1_length) {
         return;
     }
-
-    int left_value = h[INDEX_W(i, j - 1, seq_1_length)].value;
-    int diag_value = __shfl_up_sync(0xFFFFFFFF, left_value, 1);
-    if (threadIdx.x % 32 == 0) diag_value = h[INDEX_W(i - 1, j - 1, seq_1_length)].value;
-
+    
     bool match = seq_1[i] == seq_2_char;
-    int d = diag_value + (match * MATCH + (1 - match) * MISMATCH);
-    int l = left_value + GAP;
+    int d = h[INDEX(i - 1, j - 1, seq_1_length)].value + (match * MATCH + (1 - match) * MISMATCH);
+    int l = h[INDEX(i, j - 1, seq_1_length)].value + GAP;
     int u = 0;
     
     bool stop = false;
@@ -394,8 +390,8 @@ void runKernel(
 
 void runTests(const string& filename)
 {
-    std::vector<uint16_t> inputSizes = {25000};//{1000, 5000, 10000, 15000, 18000, 20000};
-    std::vector<uint16_t> blockSizes = {1024};//{32, 64, 128, 256, 512, 1024};
+    std::vector<uint16_t> inputSizes = {1000, 5000, 10000, 15000, 18000, 20000};
+    std::vector<uint16_t> blockSizes = {32, 64, 128, 256, 512, 1024};
     std::vector<void(*)(sw_mat*, char*, string, uint16_t, uint16_t, uint16_t, uint16_t, int)> kernels = {gpu_alignment_loop, gpu_alignment_smem_loop, gpu_alignment_warp_loop, gpu_alignment_warp_smem_loop};
     std::vector<bool> warpCheckErrorValues = {false, false, true, true};
     std::vector<string> kernelNames = {"parallel", "smem", "warp", "warp_smem"};

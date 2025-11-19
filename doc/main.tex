@@ -341,8 +341,104 @@ Lo speedup medio è di $1.2$ volte la versione senza Shared Memory.
         |=================================
 \end{lstlisting}
 \subsection{Ottimizzazione con warp e coalescenza}
+
+Per massimizzare le prestazioni del calcolo su GPU, non è sufficiente sfruttare la memoria a bassa latenza (SMEM); è essenziale ottimizzare il throughput della memoria e l'esecuzione a livello dell'unità base, cioè il warp.
+L'architettura hardware delle GPU è progettata per operare in modo efficiente quando i thread all'interno dello stesso warp accedono a indirizzi di Memoria Globale contigui (o che ricadono nella stessa linea di cache), ottenendo così la coalescenza degli accessi.
+La strategia di parallelizzazione per colonna (ogni thread gestisce una riga $i$ per una colonna fissa $j$) richiede che gli elementi consecutivi lungo l'asse delle righe ($i, i+1, i+2, \dots$) siano contigui in memoria per sfruttare la coalescenza. Per questo, è stato adottato un layout di memoria column-major, semplicemente modificando la macro di indicizzazione utilizzata per la matrice $H$:
+
+\begin{align*}
+    \text{Row major:} \;\; &\text{INDEX}(i, j, N_{\text{cols}}) = i \cdot N_{\text{cols}} + j\\
+    \text{Column major:} \;\; &\text{INDEX}(i, j, N_{\text{rows}}) = j \cdot N_{\text{rows}} + i
+\end{align*}
+
+
+Dove $N_{\text{rows}}$ è la lunghezza della prima sequenza (lo \textit{stride}).
+Grazie a questa modifica, l'incremento dell'indice del thread $i$ corrisponde all'incremento dell'indirizzo di memoria. Ciò garantisce che il caricamento e la scrittura dei risultati della colonna corrente $j$, e la lettura della colonna precedente $j-1$, siano coalescenti, riducendo il numero di transazioni sulla Memoria Globale e aumentando la banda effettiva.
+
+La performance delle GPU è estremamente sensibile alla divergenza, che si verifica quando i thread all'interno dello stesso warp eseguono istruzioni differenti a causa di branch ($\texttt{if/else}$).
+
+Nel calcolo del punteggio diagonale nell'algoritmo, è necessaria una condizione per discriminare tra un \texttt{match} e un \texttt{mismatch}.
+Per eliminare l'istruzione di branching associata a questa condizione, è stata implementata una versione branchless del kernel, sostituendo la logica condizionale con un'espressione aritmetica equivalente:
+
+$$
+D = H_{i-1, j-1} + \left( (\text{match} \cdot 3) + ((1 - \text{match}) \cdot -3) \right)
+$$
+
+Dove \texttt{match} è la variabile booleana che è determinata dall'uguaglianza dei caratteri confrontati. Questa tecnica garantisce che tutti i thread eseguano il medesimo percorso di istruzioni, ottenendo un significativo incremento di prestazioni.
+
+Un ulteriore livelli di ottimizzazione prevede l'uso di istruzioni di warp shuffle nel kernel. L'obiettivo è quello di utilizzare questa funzione CUDA a livello warp per accelerare ulteriormente il recupero del valore diagonale $H_{i-1, j-1}$, scambiando il dato tra i registri dei thread adiacenti anziché accedendo alla Memoria Globale.
+Tramite \texttt{\_\_shfl\_up\_sync}, il thread $i$ tenta di ottenere il valore $H_{i-1, j-1}$ dal registro del thread $i-1$ e, sebbene teoricamente ad altissima efficienza per lo scambio di registri, introduce un leggero overhead dovuto alla sincronizzazione warp implicita e alla gestione della divergenza del thread 0, il quale deve comunque caricare il valore dalla Memoria Globale non avendo a disposizione alcun thread con indice $i-1$ nel suo corrente warp.
+
+L'analisi dei risultati di esecuzione conferma l'efficacia delle ottimizzazioni e dimostra come l'eliminazione del branching aumenti le prestazioni e sia superiore perfino alla versione con il warp shuffle, infatti quest'ultima risulta più lenta della versione \textit{no branch}, per via dell'overhead di sincronizzazione imposto da \texttt{\_\_shfl\_up\_sync} e l'efficienza della cache L1. Data la perfetta coalescenza del layout column-major, l'accesso a $H_{i-1, j-1}$ nella versione no branch è gestito con un costo di latenza molto basso, che risulta complessivamente inferiore all'overhead dello shuffle e della gestione del caso limite del thread 0, che introduce ulteriore divergenza.
+Sebbene la coalescenza e la programmazione a livello warp siano fondamentali, il maggiore speedup è stato ottenuto garantendo l'assenza di divergenza nel calcolo del punteggio.
+
+Su una prova con input di 4500 caratteri per entrambe le sequenze la versione che usa coalescenza senza branching arriva a uno speedup di 15 volte superiore alla versione sequenziale.
+\begin{lstlisting}
+    Output:
+        |=============RESULTS==============
+        | CPU time:              0.461732s
+        | GPU time (warp):       0.033999s
+        | GPU time (no branch):  0.029998s
+        | GPU time (shuffle):    0.032508s
+        |=============SPEED UP=============
+        | Over CPU (warp):       13.5808
+        | Over CPU (no branch):  15.3921
+        | Over CPU (shuffle):    14.2036
+        |==================================
+        | Over warp (no branch): 1.13337
+        | Over warp (shuffle):   1.04586
+        |==================================
+\end{lstlisting}
+
+Parallelamente all'ottimizzazione dei warp, è possibile tentare di ridurre ulteriormente la latenza di accesso alla memoria utilizzando la Memoria Condivisa. L'ipotesi teorica è che, caricando esplicitamente la colonna $j-1$ nella SMEM, si possano servire le richieste dei thread molto più velocemente rispetto all'accesso alla Memoria Globale.
+
+L'implementazione con SMEM prevede che ogni thread del blocco carica il valore corrispondente $H_{i, j-1}$ dalla Memoria Globale alla SMEM, e come descritto in precedenza, una barriera \texttt{\_\_syncthreads()} assicura che tutti i dati siano visibili in modo da venire letti dalla SMEM invece che dalla memoria globale.
+
+Questa versione risulta meno efficiente della versione no-branch che accede direttamente alla Memoria Globale.
+Grazie all'ottimizzazione del layout in column-major, gli accessi alla colonna $j-1$ risultano perfettamente coalescenti. Inoltre, data la forte località temporale (i dati vengono scritti o letti nell'iterazione precedente), questi risiedono quasi certamente nella cache L1 della GPU. Al contrario, l'uso della SMEM impone un costo fisso in termini di istruzioni e, soprattutto, richiede la barriera \texttt{\_\_syncthreads()}. Quest'ultima costringe tutti i warp del blocco ad attendersi, interrompendo la pipeline di esecuzione e riducendo la capacità dello scheduler di nascondere la latenza.
+In conclusione, in uno scenario di accesso perfettamente sequenziale e coalescente, il costo amministrativo della Memoria Condivisa supera il guadagno rispetto a un hit in cache L1, rendendo l'accesso diretto alla Memoria Globale la strategia migliore.
+
+Mantenendo un input di 4500 caratteri per entrambe le sequenze la versione warp-SMEM è stata comparata con la versione warp (senza branching) senza SMEM e la versione base SMEM.
+La versione coalescente con la SMEM supera la versione base SMEM, ma rimane comunque meno efficiente della versione solamnente coalescente.
+\begin{lstlisting}
+    Output:
+        |=================RESULTS=================
+        | CPU time:                     0.291688s
+        | GPU time (SMEM):              0.036000s
+        | GPU time (warp):              0.029999s
+        | GPU time (warp SMEM):         0.030444s
+        |================SPEED UP=================
+        | Over CPU (SMEM):              8.10244
+        | Over CPU (warp):              9.72325
+        | Over CPU (warp SMEM):         9.58116
+        |=========================================
+        | Over SMEM (warp):             1.20004
+        | Over SMEM (warp SMEM):        1.1825
+        |=========================================
+        | Over warp (warp SMEM):        0.985387
+        |=========================================
+\end{lstlisting}
+
 \subsection{Analisi delle prestazioni e comparazione}
-\section{Conclusione}
+
+In questa sezione vengono presentati i risultati sperimentali ottenuti dalle diverse implementazioni dell'algoritmo Smith-Waterman su GPU, confrontandoli con l'esecuzione sequenziale su CPU. L'obiettivo è valutare l'efficacia delle diverse strategie di ottimizzazione introdotte: parallelismo naive, utilizzo della memoria condivisa (SMEM), primitive Warp-Shuffle e l'approccio ibrido Warp-SMEM.
+
+I test sono stati condotti variando due parametri fondamentali: la dimensione dei blocchi CUDA (block size) e la lunghezza delle sequenze di input ($N$). La metrica principale utilizzata per la valutazione è il tempo di esecuzione, misurato in secondi, da cui è stato derivato lo \textit{speedup} rispetto alla controparte sequenziale.
+
+La configurazione della dimensione del blocco (numero di thread per blocco) è cruciale per massimizzare l'occupazione della GPU e nascondere le latenze di accesso alla memoria. Sono stati eseguiti test con configurazioni di blocco variabili da 32 a 1024 thread, e dimensioni di input variabili.
+
+L'implementazione con coalescenza ha mostrato le prestazioni migliori in assoluto, raggiungendo il minimo tempo di esecuzione con una dimensione del blocco di 512 thread.
+Le versioni basate su SMEM e Parallelismo Naive hanno mostrato una maggiore sensibilità alla dimensione del blocco, con prestazioni degradanti per blocchi molto piccoli o molto grandi, trovando spesso un ottimo locale intorno ai 128-256 thread.
+L'uso delle primitive warp permette di ridurre drasticamente l'overhead di sincronizzazione e l'uso della memoria condivisa, rendendo l'algoritmo più robusto rispetto alle variazioni nella configurazione dei blocchi.
+
+Per valutare la scalabilità, le implementazioni sono state testate con sequenze di lunghezza variabile da $5.000$ a $20.000$ caratteri.
+I risultati evidenziano un andamento lineare del tempo di esecuzione rispetto alla dimensione dell'input, comportamento atteso per l'algoritmo Smith-Waterman. Tuttavia, la pendenza della curva per la CPU è significativamente più ripida rispetto alle versioni GPU:
+La CPU passa da $0.43$s per $N=5.000$ a circa $6.98$s per $N=20.000$. La versione warp su GPU scala molto più efficientemente, passando da $0.039$s a $0.170$s nello stesso intervallo.
+
+La tabella riassuntiva e i grafici di speedup mostrano chiaramente la gerarchia di prestazioni tra le diverse ottimizzazioni. Lo speedup è calcolato come $\frac{T_{CPU}}{T_{GPU}}$.
+
+In conclusione, l'ottimizzazione basata su warp si è rivelata la più efficace, offrendo uno speedup superiore a 40 volte. Questo risultato è dovuto all'accesso coalescente in memoria globale che permette di fornire più dati con singole transazioni di memoria. La versione SMEM offre comunque un notevole miglioramento rispetto all'approccio parallelo base, ma rimane limitata dalla banda della memoria condivisa e dalla necessità di barriere di sincronizzazione esplicite, che sono meno frequenti o assenti nella logica warp.
+
 %====================================================================
 \newpage
 \bibliographystyle{plain}

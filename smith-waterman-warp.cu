@@ -175,7 +175,7 @@ __global__ void gpu_alignment_warp_shuffle(sw_mat* h, char* seq_1, char seq_2, i
 
     int left = h[INDEX(i, j - 1, seq_1_length)].value;
     int diag = __shfl_up_sync(0xFFFFFFFF, left, 1);
-    if (threadIdx.x == 0) diag = h[INDEX(i - 1, j - 1, seq_1_length)].value;
+    if (threadIdx.x % 32 == 0) diag = h[INDEX(i - 1, j - 1, seq_1_length)].value;
 
     bool match = seq_1[i] == seq_2;
     int d = diag + (match * MATCH + (1 - match) * MISMATCH);
@@ -204,22 +204,22 @@ __global__ void gpu_alignment_warp_shuffle(sw_mat* h, char* seq_1, char seq_2, i
 void gpu_alignment_warp_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        cudaDeviceSynchronize();
     }
+    cudaDeviceSynchronize();
 }
 
 void gpu_alignment_warp_no_branch_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_no_branch<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        cudaDeviceSynchronize();
     }
+    cudaDeviceSynchronize();
 }
 
 void gpu_alignment_warp_shuffle_loop(sw_mat* h, char* seq_1, string seq_2, int seq_1_length, int seq_2_length, int grid, int block) {
     for (int j = 1; j < seq_2_length; ++j) {
         gpu_alignment_warp_shuffle<<<grid, block>>>(h, seq_1, seq_2[j], seq_1_length, seq_2_length, j);
-        cudaDeviceSynchronize();
     }
+    cudaDeviceSynchronize();
 }
 
 int main(int argc, char **argv) {

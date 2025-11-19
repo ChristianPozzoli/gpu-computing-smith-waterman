@@ -290,13 +290,9 @@ __global__ void gpu_alignment_warp(sw_mat* h, char* seq_1, char seq_2_char, int 
         return;
     }
 
-    int left_value = h[INDEX_W(i, j - 1, seq_1_length)].value;
-    int diag_value = __shfl_up_sync(0xFFFFFFFF, left_value, 1);
-    if (threadIdx.x % 32 == 0) diag_value = h[INDEX_W(i - 1, j - 1, seq_1_length)].value;
-
     bool match = seq_1[i] == seq_2_char;
-    int d = diag_value + (match * MATCH + (1 - match) * MISMATCH);
-    int l = left_value + GAP;
+    int d = h[INDEX(i - 1, j - 1, seq_1_length)].value + (match * MATCH + (1 - match) * MISMATCH);
+    int l = h[INDEX(i, j - 1, seq_1_length)].value + GAP;
     int u = 0;
     
     bool stop = false;
@@ -390,7 +386,7 @@ void gpu_alignment_warp_smem_loop(sw_mat* h, char* seq_1, string seq_2, int seq_
 }
 
 int main(int argc, char **argv) {
-    string main_sequence = random_dna(10000);
+    string main_sequence = random_dna(4500);
     string sequence = mutate_dna(main_sequence);
 
     int rows = main_sequence.length();
