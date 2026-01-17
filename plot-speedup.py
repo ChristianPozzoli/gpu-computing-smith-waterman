@@ -4,7 +4,7 @@ import seaborn as sns
 import numpy as np
 from matplotlib.ticker import NullLocator, ScalarFormatter
 
-filename = "results_17112025_190448.csv"
+filename = "results_25112025_125912.csv"
 df = pd.read_csv(filename)
 
 gpu_algorithms = ['cpu', 'parallel', 'smem', 'warp', 'warp_smem']
@@ -39,7 +39,7 @@ ax.yaxis.set_major_formatter(ScalarFormatter())
 ax.xaxis.set_major_formatter(ScalarFormatter())
 
 # Baseline a y=1 per riferimento
-#ax.axhline(1, color='red', linestyle='--', label='Baseline CPU (1x)')
+ax.axhline(1, color='red', linestyle='--', label='Baseline CPU')
 
 ax.set_xlabel("Input Size (Scala Log)")
 ax.set_ylabel("Speedup (Scala Log)")

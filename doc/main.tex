@@ -427,6 +427,10 @@ I test sono stati condotti variando due parametri fondamentali: la dimensione de
 
 La configurazione della dimensione del blocco (numero di thread per blocco) è cruciale per massimizzare l'occupazione della GPU e nascondere le latenze di accesso alla memoria. Sono stati eseguiti test con configurazioni di blocco variabili da 32 a 1024 thread, e dimensioni di input variabili.
 
+\begin{figure}[H]
+    \includegraphics[width=1\linewidth]{images/plot-block.png}
+\end{figure}
+
 L'implementazione con coalescenza ha mostrato le prestazioni migliori in assoluto, raggiungendo il minimo tempo di esecuzione con una dimensione del blocco di 512 thread.
 Le versioni basate su SMEM e Parallelismo Naive hanno mostrato una maggiore sensibilità alla dimensione del blocco, con prestazioni degradanti per blocchi molto piccoli o molto grandi, trovando spesso un ottimo locale intorno ai 128-256 thread.
 L'uso delle primitive warp permette di ridurre drasticamente l'overhead di sincronizzazione e l'uso della memoria condivisa, rendendo l'algoritmo più robusto rispetto alle variazioni nella configurazione dei blocchi.
@@ -435,7 +439,17 @@ Per valutare la scalabilità, le implementazioni sono state testate con sequenze
 I risultati evidenziano un andamento lineare del tempo di esecuzione rispetto alla dimensione dell'input, comportamento atteso per l'algoritmo Smith-Waterman. Tuttavia, la pendenza della curva per la CPU è significativamente più ripida rispetto alle versioni GPU:
 La CPU passa da $0.43$s per $N=5.000$ a circa $6.98$s per $N=20.000$. La versione warp su GPU scala molto più efficientemente, passando da $0.039$s a $0.170$s nello stesso intervallo.
 
+
+\begin{figure}
+    \includegraphics[width=1\linewidth]{images/plot-input-size.png}
+\end{figure}
+
 La tabella riassuntiva e i grafici di speedup mostrano chiaramente la gerarchia di prestazioni tra le diverse ottimizzazioni. Lo speedup è calcolato come $\frac{T_{CPU}}{T_{GPU}}$.
+
+
+\begin{figure}
+    \includegraphics[width=1\linewidth]{images/plot-speedup.png}
+\end{figure}
 
 In conclusione, l'ottimizzazione basata su warp si è rivelata la più efficace, offrendo uno speedup superiore a 40 volte. Questo risultato è dovuto all'accesso coalescente in memoria globale che permette di fornire più dati con singole transazioni di memoria. La versione SMEM offre comunque un notevole miglioramento rispetto all'approccio parallelo base, ma rimane limitata dalla banda della memoria condivisa e dalla necessità di barriere di sincronizzazione esplicite, che sono meno frequenti o assenti nella logica warp.
 

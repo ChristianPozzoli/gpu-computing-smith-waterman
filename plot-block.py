@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-filename = "results_17112025_190448.csv"
+filename = "results_25112025_125912.csv"
 df = pd.read_csv(filename)
 
 gpu_opts = ['parallel', 'smem', 'warp', 'warp_smem']
@@ -33,7 +33,7 @@ for ax in g.axes.flat:
     ax.set_xticklabels(block_size_ticks)
     ax.xaxis.set_minor_locator(plt.NullLocator())
 
-g.set_axis_labels("Dimensione Blocco (threads)", "Tempo minimo [ms]")
+g.set_axis_labels("Dimensione Blocco (threads, scala log)", "Tempo minimo [ms]")
 g.set_titles("Input Size: {col_name}")
 
 sns.move_legend(
@@ -45,6 +45,6 @@ sns.move_legend(
     frameon=False,
 )
 
-g.figure.subplots_adjust(top=0.92)
+g.figure.subplots_adjust(top=0.92, left=0.08, right=0.98, hspace=0.175, wspace=0.175)
 
 plt.show()

@@ -4,7 +4,7 @@ import seaborn as sns
 import numpy as np
 from matplotlib.ticker import NullLocator, ScalarFormatter
 
-filename = "results_17112025_190448.csv"
+filename = "results_25112025_125912.csv"
 df = pd.read_csv(filename)
 
 gpu_algorithms = ['parallel', 'smem', 'warp', 'warp_smem']
