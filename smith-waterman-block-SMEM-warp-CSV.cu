@@ -392,9 +392,9 @@ void runTests(const string& filename)
 {
     std::vector<uint16_t> inputSizes = {1000, 5000, 10000, 15000, 18000, 20000};
     std::vector<uint16_t> blockSizes = {32, 64, 128, 256, 512, 1024};
-    std::vector<void(*)(sw_mat*, char*, string, uint16_t, uint16_t, uint16_t, uint16_t, int)> kernels = {gpu_alignment_warp_loop};//{gpu_alignment_loop, gpu_alignment_smem_loop, gpu_alignment_warp_loop, gpu_alignment_warp_smem_loop};
-    std::vector<bool> warpCheckErrorValues = {true};//{false, false, true, true};
-    std::vector<string> kernelNames = {"warp"};//{"parallel", "smem", "warp", "warp_smem"};
+    std::vector<void(*)(sw_mat*, char*, string, uint16_t, uint16_t, uint16_t, uint16_t, int)> kernels = {gpu_alignment_loop, gpu_alignment_smem_loop, gpu_alignment_warp_loop, gpu_alignment_warp_smem_loop};
+    std::vector<bool> warpCheckErrorValues = {false, false, true, true};
+    std::vector<string> kernelNames = {"parallel", "smem", "warp", "warp_smem"};
     
     
     for (uint16_t n : inputSizes)
@@ -434,7 +434,7 @@ void runTests(const string& filename)
         CHECK(cudaMemcpy(d_h1, h, nBytes, cudaMemcpyHostToDevice));
         
         cout << "\tCPU [";
-        for(uint8_t i = 0; i < 1/*TEST_REPETITION*/; ++i)
+        for(uint8_t i = 0; i < TEST_REPETITION; ++i)
         {
             double start = seconds();
             cpu_alignment(h, main_sequence, sequence, rows, cols);
